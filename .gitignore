@@ -1,0 +1,46 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Env / secrets
+.env
+.env.*
+!.env.example
+
+# Node / Next
+node_modules/
+.next/
+out/
+dist/
+*.tsbuildinfo
+next-env.d.ts
+npm-debug.log*
+yarn-error.log*
+
+# Storage / uploads (local dev)
+storage/
+uploads/
+
+# OS / editors
+.DS_Store
+.idea/
+.vscode/
+*.swp
+
+# --- Internal / not for the public repo (kept locally, never published) ---
+# Private deployment notes with real server IPs, keys and hostnames.
+# Anchored to the repo root so the public docs/DEPLOY.md is NOT ignored.
+/DEPLOY.md
+# Assistant/project context, not relevant to public users.
+CLAUDE.md
+CLAUDE.md.*
+# Design canvases: large vendored JS + sample internal task keys.
+design/
+# Real nginx vhost with production IP; a generic example ships instead.
+deploy/nginx-pms.conf

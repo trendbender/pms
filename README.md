@@ -2,9 +2,14 @@
 
 A self-hostable **Scrumban** system for managing projects, teams and tasks —
 Kanban board + short sprints + the Agile practices that matter, without the
-weight of a full-blown Jira. Built for a single operator or a small team that
-juggles many projects and people at once: the operational layer that answers
-*"what's happening / where are the blockers / what needs me right now."*
+weight of a full-blown Jira.
+
+**Built for an agency running many client projects at once.** It's the light,
+simple operational layer that answers *"what's happening / where are the blockers
+/ what needs me right now"* across dozens of projects — and it's designed so that
+**AI agents can see and drive the board and backlog too**, creating, updating and
+closing tasks through a tiny CLI and the REST API. The result is one live log of
+work across every client, which you can roll up into monthly per-project reports.
 
 **License:** MIT · **Stack:** FastAPI · PostgreSQL · Redis · Next.js · TypeScript
 
@@ -151,10 +156,13 @@ pms/
 └── docs/
 ```
 
-## CLI
+## CLI — and AI agents
 
 `scripts/pms.py` is a dependency-free (stdlib-only) command-line client for the
-REST API — handy for automation, scripts and bots:
+REST API — handy for automation, scripts, bots and **AI coding agents**. Point
+an agent at it and it can read a project's board and backlog, open a task for the
+work it's about to do, keep the status current, comment, and close it when done —
+so every project has one live log a human and an agent share:
 
 ```bash
 pms.py projects

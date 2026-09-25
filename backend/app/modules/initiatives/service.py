@@ -16,6 +16,7 @@ async def _counts(db: AsyncSession, project_id: UUID) -> dict[UUID, tuple[int, i
     done_case = func.count(1).filter(TaskStatus.category == StatusCategory.DONE.value)
     rows = await db.execute(
         select(Task.initiative_id, func.count(1), done_case)
+        .select_from(Task)
         .join(TaskStatus, TaskStatus.id == Task.status_id)
         .where(
             Task.project_id == project_id,
@@ -45,6 +46,7 @@ async def list_initiatives(db: AsyncSession, project_id: UUID) -> list[Initiativ
                 project_id=i.project_id,
                 name=i.name,
                 description=i.description,
+                due_date=i.due_date,
                 task_count=total,
                 done_count=done,
                 archived_at=i.archived_at,
@@ -60,6 +62,9 @@ async def _single_counts(db: AsyncSession, initiative_id: UUID) -> tuple[int, in
     total, done = (
         await db.execute(
             select(func.count(1), done_case)
+            # левая сторона задаётся явно: в запросе нет ORM-сущности в колонках,
+            # и без select_from SQLAlchemy не знает, от чего join'иться к статусам
+            .select_from(Task)
             .join(TaskStatus, TaskStatus.id == Task.status_id)
             .where(Task.initiative_id == initiative_id, Task.deleted_at.is_(None))
         )
@@ -78,6 +83,7 @@ def to_out(i: Initiative, task_count: int = 0, done_count: int = 0) -> Initiativ
         project_id=i.project_id,
         name=i.name,
         description=i.description,
+        due_date=i.due_date,
         task_count=task_count,
         done_count=done_count,
         archived_at=i.archived_at,

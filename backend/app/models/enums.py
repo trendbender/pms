@@ -49,6 +49,32 @@ class Priority(StrEnum):
     NONE = "NONE"
 
 
+class ContractType(StrEnum):
+    """Как устроена оплата по договору."""
+
+    FIXED = "FIXED"          # разовая работа под фиксированную сумму
+    MILESTONE = "MILESTONE"  # этапами: каждый этап оплачивается отдельно
+    RETAINER = "RETAINER"    # абонентская плата за период
+    HOURLY = "HOURLY"        # почасовая ставка
+
+
+class PaymentKind(StrEnum):
+    PREPAY = "PREPAY"        # предоплата
+    MILESTONE = "MILESTONE"  # оплата этапа или вехи
+    RETAINER = "RETAINER"    # абонентский платёж за месяц
+    HOURLY = "HOURLY"        # оплата отработанных часов
+    EXTRA = "EXTRA"          # доплата за работы вне договора
+
+
+class PaymentStatus(StrEnum):
+    """Просрочка не хранится: она считается из due_date и текущего статуса."""
+
+    EXPECTED = "EXPECTED"    # запланирован, счёт ещё не выставлен
+    INVOICED = "INVOICED"    # счёт выставлен, деньги не пришли
+    PAID = "PAID"
+    CANCELLED = "CANCELLED"  # отменён или списан
+
+
 class SprintStatus(StrEnum):
     PLANNED = "PLANNED"
     ACTIVE = "ACTIVE"

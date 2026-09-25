@@ -4,6 +4,7 @@ from app.models.attachment import Attachment
 from app.models.audit import ActivityLog, AuditLog
 from app.models.base import Base
 from app.models.comment import Comment
+from app.models.finance import Contract, Payment
 from app.models.initiative import Initiative
 from app.models.notification import Notification
 from app.models.project import Project, ProjectMember
@@ -25,6 +26,8 @@ __all__ = [
     "TaskType",
     "TaskStatus",
     "Comment",
+    "Contract",
+    "Payment",
     "Attachment",
     "Notification",
     "ActivityLog",

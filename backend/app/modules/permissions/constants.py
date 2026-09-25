@@ -43,6 +43,11 @@ class Perm(StrEnum):
     BOARD_VIEW = "board.view"
     BOARD_MANAGE = "board.manage"
 
+    # Деньги видит и ведёт только управляющий уровень: суммы клиентов не должны
+    # быть видны рядовому исполнителю или подрядчику, добавленному в проект.
+    FINANCE_VIEW = "finance.view"
+    FINANCE_MANAGE = "finance.manage"
+
 
 ALL_PERMS: frozenset[Perm] = frozenset(Perm)
 
@@ -82,6 +87,8 @@ _MANAGER_PERMS: frozenset[Perm] = _MEMBER_PERMS | frozenset(
         Perm.ATTACHMENT_DELETE,
         Perm.SPRINT_MANAGE,
         Perm.BOARD_MANAGE,
+        Perm.FINANCE_VIEW,
+        Perm.FINANCE_MANAGE,
     }
 )
 

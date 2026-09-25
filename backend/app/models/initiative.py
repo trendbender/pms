@@ -1,7 +1,7 @@
-from datetime import datetime
+from datetime import date, datetime
 from uuid import UUID
 
-from sqlalchemy import DateTime, ForeignKey, String, Text
+from sqlalchemy import Date, DateTime, ForeignKey, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import Base, TimestampMixin, uuid_pk
@@ -22,5 +22,8 @@ class Initiative(Base, TimestampMixin):
 
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    # Веха без даты не является контрольной точкой, поэтому дата живёт прямо здесь.
+    due_date: Mapped[date | None] = mapped_column(Date, nullable=True, index=True)
 
     archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

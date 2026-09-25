@@ -76,6 +76,7 @@ async def create_initiative(
         project_id=project_id,
         name=body.name,
         description=body.description,
+        due_date=body.due_date,
     )
     db.add(obj)
     await db.flush()
@@ -113,6 +114,8 @@ async def update_initiative(
         initiative.name = body.name
     if body.description is not None:
         initiative.description = body.description
+    if "due_date" in body.model_fields_set:
+        initiative.due_date = body.due_date
     await db.flush()
     return await service.get_out(db, initiative)
 

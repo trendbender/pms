@@ -12,15 +12,21 @@ The access token is cached under ~/.cache and refreshed automatically.
 
 Examples:
     pms.py projects
+    pms.py project-add --code AXM --name "Axiom Charter" --group "Клиентские"
     pms.py list --project ABC
     pms.py show ABC-26
     pms.py add --project ABC --title "Check the forms" --priority HIGH
     pms.py add --project ABC --title "Update the block" --desc "..." --attach /tmp/shot.jpg
+    pms.py add --project ABC --title "Send the questions" --due завтра
+    pms.py edit ABC-26 --due 2026-10-14      # снять срок: --due none
     pms.py attach ABC-26 /tmp/screenshot.jpg
     pms.py comment ABC-26 "done, waiting for review"
     pms.py status ABC-26 "In Progress"
     pms.py done ABC-26
     pms.py assign ABC-26 --to teammate@example.com
+    pms.py members --project ABC
+    pms.py member-add --user agent@example.com --role MEMBER          # all projects
+    pms.py member-add --user agent@example.com --project ABC --role VIEWER
     pms.py rm ABC-26 --yes
 
 Add --json to most read commands for machine output.
@@ -29,6 +35,8 @@ Add --json to most read commands for machine output.
 from __future__ import annotations
 
 import argparse
+import datetime as _dt
+from decimal import Decimal
 import json
 import mimetypes
 import os
@@ -40,10 +48,12 @@ import urllib.request
 import uuid
 from pathlib import Path
 
-# Back-compat: honour the older PMS_BOT_* env names if they are set.
+# Back-compat: honour the older PMS_BOT_* env names and the older config path
+# (~/.config/pms_bot.json), which deployed bots still use.
 CONFIG_PATH = os.environ.get("PMS_CONFIG") or os.environ.get(
     "PMS_BOT_CONFIG", str(Path.home() / ".config/pms.json")
 )
+LEGACY_CONFIG_PATH = str(Path.home() / ".config/pms_bot.json")
 CACHE_PATH = Path(
     os.environ.get("PMS_CACHE")
     or os.environ.get("PMS_BOT_CACHE", str(Path.home() / ".cache/pms_token.json"))
@@ -56,10 +66,17 @@ CACHE_PATH = Path(
 
 
 def _load_config() -> dict:
-    try:
-        with open(CONFIG_PATH) as fh:
-            cfg = json.load(fh)
-    except FileNotFoundError:
+    paths = [CONFIG_PATH]
+    if LEGACY_CONFIG_PATH not in paths:
+        paths.append(LEGACY_CONFIG_PATH)
+    for path in paths:
+        try:
+            with open(path) as fh:
+                cfg = json.load(fh)
+            break
+        except FileNotFoundError:
+            continue
+    else:
         die(f"config not found: {CONFIG_PATH} (create it, chmod 600)")
     cfg.setdefault("api_base", "http://localhost:8000")
     if not cfg.get("email") or not cfg.get("password"):
@@ -277,6 +294,109 @@ def pick_status(statuses: list[dict], query: str) -> dict | None:
 
 
 # --------------------------------------------------------------------------- #
+# Сроки (due_at)
+# --------------------------------------------------------------------------- #
+
+# PMS живёт по Москве, перехода на летнее время в РФ нет — фиксированный сдвиг
+# честнее зависимости от tzdata на машине, где крутится бот.
+MSK = _dt.timezone(_dt.timedelta(hours=3))
+
+DUE_HELP = ("срок: 2026-09-24, 24.09, завтра, +3b (рабочих дней, канон для клиентских "
+            "проектов), +3d (календарных), '2026-09-24 18:00'. Дата без времени = конец дня "
+            "по Москве; относительный срок, выпавший на выходной, переносится вперёд")
+
+# Рабочие дни (вики conventions/business-days.md). Helper лежит рядом со скриптом;
+# нет его — считаем по календарю и говорим об этом вслух, молча врать сроком нельзя.
+try:
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    from workdays import add_workdays as _add_workdays, next_workday as _next_workday
+except Exception:  # noqa: BLE001 — helper необязателен, деградируем предсказуемо
+    _add_workdays = None
+    _next_workday = None
+
+
+_DUE_CLEAR = {"", "none", "нет", "-", "null", "снять"}
+_DUE_REL = {"today": 0, "сегодня": 0, "tomorrow": 1, "завтра": 1, "послезавтра": 2}
+_DUE_FORMATS = ("%Y-%m-%d %H:%M", "%Y-%m-%dT%H:%M", "%Y-%m-%d %H:%M:%S",
+                "%Y-%m-%d", "%d.%m.%Y %H:%M", "%d.%m.%Y", "%d.%m %H:%M", "%d.%m")
+
+
+def _end_of_day(d: _dt.date) -> str:
+    return _dt.datetime.combine(d, _dt.time(23, 59), MSK).isoformat()
+
+
+def _roll(d):
+    """Относительный срок, выпавший на выходной или праздник, двигаем вперёд.
+
+    Явно названную дату не трогаем: она обычно приходит извне (площадка, договор)
+    и подмена такого срока хуже, чем дедлайн в субботу.
+    """
+    return _next_workday(d) if _next_workday else d
+
+
+def parse_due(value: str) -> str | None:
+    """'2026-09-24' | '24.09' | 'завтра' | '+3d' | '2026-09-24 18:00' → ISO +03:00.
+
+    Голая дата означает конец дня (23:59 МСК): иначе задача со сроком «сегодня»
+    сразу считается просроченной. Возвращает None для none/нет/- — вызывающий
+    код должен отправить null и снять срок.
+    """
+    raw = (value or "").strip().lower()
+    if raw in _DUE_CLEAR:
+        return None
+
+    now = _dt.datetime.now(MSK)
+    if raw in _DUE_REL:
+        return _end_of_day(_roll((now + _dt.timedelta(days=_DUE_REL[raw])).date()))
+
+    m = re.fullmatch(r"\+?(\d+)\s*(рд|b|р|[dдwнmм])", raw)
+    if m:
+        unit, n = m.group(2), int(m.group(1))
+        if unit in ("b", "р", "рд"):  # рабочие дни — канон для клиентских проектов
+            if _add_workdays is None:
+                die("рабочие дни недоступны: рядом с pms.py нет workdays.py "
+                    "(вики conventions/business-days.md). Поставь срок датой или в +Nd")
+            return _end_of_day(_add_workdays(now.date(), n))
+        step = {"d": 1, "д": 1, "w": 7, "н": 7, "m": 30, "м": 30}[unit]
+        return _end_of_day(_roll((now + _dt.timedelta(days=n * step)).date()))
+
+    for fmt in _DUE_FORMATS:
+        try:
+            dt = _dt.datetime.strptime(raw, fmt)
+        except ValueError:
+            continue
+        if "%Y" not in fmt:  # «24.09» — текущий год
+            dt = dt.replace(year=now.year)
+        if "%H" not in fmt:  # дата без времени — конец дня
+            dt = dt.replace(hour=23, minute=59)
+        return dt.replace(tzinfo=MSK).isoformat()
+
+    die(f"не понимаю срок: {value} "
+        f"(примеры: 2026-09-24, 24.09, завтра, +3d, '2026-09-24 18:00', none)")
+
+
+def fmt_due(value: str | None, *, long: bool = False) -> str:
+    """ISO из API → «24.09», «24.09 (завтра)», «24.09 (просрочено)». Пусто, если срока нет."""
+    if not value:
+        return ""
+    try:
+        dt = _dt.datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except ValueError:
+        return str(value)
+    local = dt.astimezone(MSK)
+    days = (local.date() - _dt.datetime.now(MSK).date()).days
+    label = {0: "сегодня", 1: "завтра", 2: "послезавтра", -1: "вчера"}.get(days)
+    if days < 0 and label is None:
+        label = f"просрочено на {-days} дн."
+    elif days < 0:
+        label = f"{label}, просрочено"
+    date = local.strftime("%d.%m.%Y" if long else "%d.%m")
+    if local.hour != 23 or local.minute != 59:
+        date += local.strftime(" %H:%M")
+    return f"{date} ({label})" if label else date
+
+
+# --------------------------------------------------------------------------- #
 # Output
 # --------------------------------------------------------------------------- #
 
@@ -304,12 +424,29 @@ def cmd_whoami(client, args):
 
 
 def cmd_projects(client, args):
-    ps = client.call("GET", "/projects")
+    # the API hides archived projects unless asked
+    ps = client.call("GET", "/projects?include_archived=true" if args.archived else "/projects")
     ps.sort(key=lambda p: (p.get("group_name") or "", p["code"]))
     out(ps, args.json, lambda ps: [
         print(f"{p['code']:<6} {p['name']}  ·  {p.get('group_name') or '—'}  [{p['status']}/{p['health']}]")
         for p in ps
     ])
+
+
+def cmd_project_add(client, args):
+    """Create a project. The code is permanent: task keys and links hang off it."""
+    body = {"name": args.name, "code": args.code.strip().upper()}
+    if args.group:
+        body["group_name"] = args.group
+    if args.goal:
+        body["goal"] = args.goal
+    p = client.call("POST", "/projects", body)
+
+    def human(p):
+        print(f"создан проект {p['code']} — {p['name']} · {p.get('group_name') or '—'}")
+        print(f"{client.web_base}/projects/{p['code'].lower()}")
+
+    out(p, args.json, human)
 
 
 def cmd_list(client, args):
@@ -326,7 +463,9 @@ def cmd_list(client, args):
         for t in ts:
             who = users.get(t.get("assignee_id"), "—")
             blk = " ⛔" if t.get("is_blocked") else ""
-            print(f"{t['key']:<8} [{t.get('status_name','?'):<12}] {t['priority']:<8} @{who}{blk}  {t['title']}")
+            due = fmt_due(t.get("due_at"))
+            due = f" ⏰{due}" if due else ""
+            print(f"{t['key']:<8} [{t.get('status_name','?'):<12}] {t['priority']:<8} @{who}{blk}{due}  {t['title']}")
             print(f"         {client.task_url(t['key'])}")
     out(tasks, args.json, render)
 
@@ -343,6 +482,8 @@ def cmd_show(client, args):
     print(client.task_url(full["key"]))
     print(f"статус: {full.get('status_name')} ({full.get('status_category')}) · приоритет: {full['priority']}")
     print(f"исполнитель: {users.get(full.get('assignee_id'),'—')} · проверяющий: {users.get(full.get('reviewer_id'),'—')}")
+    if full.get("due_at"):
+        print(f"срок: {fmt_due(full['due_at'], long=True)}")
     if full.get("description"):
         print(f"\n{full['description']}")
     if full.get("is_blocked"):
@@ -360,6 +501,10 @@ def cmd_add(client, args):
         body["description"] = args.desc
     if args.priority:
         body["priority"] = args.priority.upper()
+    if args.due:
+        due = parse_due(args.due)
+        if due:
+            body["due_at"] = due
     task = client.call("POST", "/tasks", body)
     if args.assignee:
         user = resolve_user(client, args.assignee)
@@ -368,6 +513,8 @@ def cmd_add(client, args):
 
     def human(t):
         print(f"создана {t['key']}: {t['title']}")
+        if t.get("due_at"):
+            print(f"срок: {fmt_due(t['due_at'], long=True)}")
         if attached:
             print(f"вложений: {len(attached)} ({', '.join(a.get('filename', '?') for a in attached)})")
         print(client.task_url(t["key"]))
@@ -396,10 +543,19 @@ def cmd_edit(client, args):
         body["description"] = args.desc
     if args.priority:
         body["priority"] = args.priority.upper()
+    if args.due is not None:
+        body["due_at"] = parse_due(args.due)  # None снимает срок
     if not body:
-        die("nothing to change (pass --title / --desc / --priority)")
+        die("nothing to change (pass --title / --desc / --priority / --due)")
     t = client.call("PATCH", f"/tasks/{task['id']}", body)
-    out(t, args.json, lambda t: print(f"обновлена {t['key']}\n{client.task_url(t['key'])}"))
+
+    def human(t):
+        print(f"обновлена {t['key']}")
+        if "due_at" in body:
+            print(f"срок: {fmt_due(t.get('due_at'), long=True) or 'снят'}")
+        print(client.task_url(t["key"]))
+
+    out(t, args.json, human)
 
 
 def cmd_comment(client, args):
@@ -443,9 +599,278 @@ def cmd_rm(client, args):
     print(f"{task['key']} удалена")
 
 
+PROJECT_ROLES = ["OWNER", "MANAGER", "MEMBER", "VIEWER", "GUEST"]
+
+
+def _target_projects(client, args) -> list[dict]:
+    """The projects a member command applies to: one (--project) or all of them."""
+    if args.project:
+        return [resolve_project(client, args.project)]
+    return client.call(
+        "GET", "/projects?include_archived=true" if args.archived else "/projects"
+    )
+
+
+def cmd_members(client, args):
+    project = resolve_project(client, args.project)
+    ms = client.call("GET", f"/projects/{project['id']}/members")
+    out(ms, args.json, lambda ms: [
+        print(f"{m['role']:<8} {m['name']} <{m['email']}>") for m in ms
+    ])
+
+
+def cmd_member_add(client, args):
+    """Grant a user access to one project or to every project at once.
+
+    The API upserts, so re-running on a project the user already has only
+    changes the role — safe to repeat after new projects appear.
+    """
+    user = resolve_user(client, args.user)
+    body = {"user_id": user["id"], "role": args.role}
+    done = []
+    for project in _target_projects(client, args):
+        client.call("POST", f"/projects/{project['id']}/members", body)
+        done.append({"code": project["code"], "name": project["name"], "role": args.role})
+
+    def human(done):
+        for d in done:
+            print(f"{d['code']:<6} {d['name']}  ·  {d['role']}")
+        print(f"{user['name']} <{user['email']}> — доступ в {len(done)} проект(ов)")
+
+    out(done, args.json, human)
+
+
+def cmd_member_rm(client, args):
+    user = resolve_user(client, args.user)
+    targets = _target_projects(client, args)
+    if not args.project and not args.yes:
+        die(f"refusing to drop {user['email']} from {len(targets)} projects without --yes")
+    done = []
+    for project in targets:
+        try:
+            client.call("DELETE", f"/projects/{project['id']}/members/{user['id']}")
+        except ApiError as e:
+            if e.status == 404:  # not a member of this one — nothing to do
+                continue
+            raise
+        done.append({"code": project["code"], "name": project["name"]})
+
+    def human(done):
+        for d in done:
+            print(f"{d['code']:<6} {d['name']}")
+        print(f"{user['name']} <{user['email']}> — убран из {len(done)} проект(ов)")
+
+    out(done, args.json, human)
+
+
 # --------------------------------------------------------------------------- #
 # CLI
 # --------------------------------------------------------------------------- #
+
+
+# --------------------------------------------------------------------------- #
+# Деньги (договоры и платежи). Канон процесса — вики projects/klientlab/portfolio-management
+# --------------------------------------------------------------------------- #
+
+
+def _money_fmt(v) -> str:
+    """15000.00 -> «15 000 руб.» (в отчётах и чатах пишем руб., не знак валюты)."""
+    try:
+        n = Decimal(str(v))
+    except Exception:  # noqa: BLE001
+        return str(v)
+    whole = f"{n:,.0f}".replace(",", " ")
+    return f"{whole} руб."
+
+
+def _due_date_only(value: str) -> str | None:
+    """Срок платежа это дата, без времени. Понимает и +3b (рабочие дни)."""
+    iso = parse_due(value)
+    return iso[:10] if iso else None
+
+
+def _finance_call(client, method, path, body=None):
+    """Финансовый модуль может быть ещё не выкачен: 404 объясняем словами."""
+    try:
+        return client.call(method, path, body)
+    except ApiError as e:
+        if e.status == 404 and ("/finance" in path or "payments" in path):
+            die("финансовый модуль не отвечает на этом инстансе PMS "
+                "(не выкачен на прод? см. задачу KL-8)")
+        raise
+
+
+def _payments(client, project=None, include_paid=True, status=None):
+    q = []
+    if project:
+        q.append(f"project_id={project['id']}")
+    if status:
+        q.append(f"status={status}")
+    if not include_paid:
+        q.append("include_paid=false")
+    path = "/finance/payments" + ("?" + "&".join(q) if q else "")
+    return _finance_call(client, "GET", path)
+
+
+def resolve_payment(client, ref: str) -> dict:
+    """Платёж по началу id (8 знаков достаточно) или по точному id."""
+    ref = ref.strip().lower()
+    rows = _payments(client)
+    exact = [p for p in rows if p["id"] == ref]
+    if exact:
+        return exact[0]
+    hits = [p for p in rows if p["id"].startswith(ref)]
+    if not hits:
+        die(f"платёж не найден: {ref} (смотри pms.py money list)")
+    if len(hits) > 1:
+        die(f"неоднозначно: {ref} подходит под {len(hits)} платежей, дай больше знаков id")
+    return hits[0]
+
+
+def _print_payment_line(p: dict) -> None:
+    mark = "ПРОСРОЧЕН" if p.get("is_overdue") else p["status"]
+    due = p.get("due_date") or "без срока"
+    proj = p.get("project_code") or ""
+    print(f"{p['id'][:8]}  {proj:<5} {_money_fmt(p['amount']):>14}  {due}  [{mark}]  {p['title']}")
+    for extra, label in ((p.get("invoice_no"), "счёт"), (p.get("act_no"), "акт")):
+        if extra:
+            print(f"{'':10}  {label} {extra}")
+
+
+def cmd_money_list(client, args):
+    project = resolve_project(client, args.project) if args.project else None
+    rows = _payments(client, project, include_paid=args.all, status=args.status)
+    if args.json:
+        out(rows, True, None)
+        return
+    if not rows:
+        print("платежей нет" + (f" по проекту {project['code']}" if project else ""))
+        return
+    head = f"Платежи{' — ' + project['code'] if project else ''}: {len(rows)}"
+    print(head)
+    for p in rows:
+        _print_payment_line(p)
+    open_sum = sum(Decimal(str(p["amount"])) for p in rows if p["status"] in ("EXPECTED", "INVOICED"))
+    if open_sum:
+        print(f"Открыто: {_money_fmt(open_sum)}")
+
+
+def cmd_money_calendar(client, args):
+    cal = _finance_call(client, "GET", f"/finance/calendar?weeks={args.weeks}")
+    if args.json:
+        out(cal, True, None)
+        return
+    print(f"Календарь платежей на {cal['today']}")
+    blocks = (
+        ("Просрочено", cal["overdue"]),
+        ("Ближайшие 7 дней", cal["due_soon"]),
+        (f"Дальше, до {cal['forecast_until']}", cal["upcoming"]),
+        ("Вехи без счёта", cal["unbilled_milestones"]),
+        ("Оплачено за неделю", cal["recently_paid"]),
+    )
+    for title, rows in blocks:
+        if not rows:
+            continue
+        print(f"\n— {title} —")
+        for p in rows:
+            _print_payment_line(p)
+    print()
+    print(f"Просрочено всего: {_money_fmt(cal['total_overdue'])}")
+    print(f"Открыто всего: {_money_fmt(cal['total_open'])}")
+    print(f"Прогноз до {cal['forecast_until']}: {_money_fmt(cal['forecast_amount'])}")
+
+
+def cmd_money_add(client, args):
+    project = resolve_project(client, args.project)
+    body = {"title": args.title, "amount": str(args.amount), "kind": args.kind}
+    if args.due:
+        body["due_date"] = _due_date_only(args.due)
+    if args.note:
+        body["note"] = args.note
+    if args.invoice:
+        body["invoice_no"] = args.invoice
+    if args.doc:
+        body["doc_url"] = args.doc
+    if args.initiative:
+        body["initiative_id"] = args.initiative
+    if args.contract:
+        body["contract_id"] = args.contract
+    p = _finance_call(client, "POST", f"/projects/{project['id']}/payments", body)
+
+    def human(p):
+        print(f"платёж заведён: {p['id'][:8]} · {project['code']} · {_money_fmt(p['amount'])}"
+              f" · срок {p.get('due_date') or 'не задан'} · {p['title']}")
+    out(p, args.json, human)
+
+
+def cmd_money_invoice(client, args):
+    p = resolve_payment(client, args.id)
+    body = {}
+    if args.no:
+        body["invoice_no"] = args.no
+    if args.date:
+        body["invoiced_at"] = _due_date_only(args.date)
+    if args.due:
+        body["due_date"] = _due_date_only(args.due)
+    r = client.call("POST", f"/finance/payments/{p['id']}/invoice", body)
+    out(r, args.json, lambda r: print(
+        f"счёт выставлен: {r['id'][:8]} · {_money_fmt(r['amount'])} · счёт {r.get('invoice_no') or '—'}"
+        f" · срок {r.get('due_date') or 'не задан'}"))
+
+
+def cmd_money_paid(client, args):
+    p = resolve_payment(client, args.id)
+    body = {}
+    if args.date:
+        body["paid_at"] = _due_date_only(args.date)
+    if args.amount:
+        body["amount"] = str(args.amount)
+    if args.act:
+        body["act_no"] = args.act
+    r = client.call("POST", f"/finance/payments/{p['id']}/paid", body)
+    out(r, args.json, lambda r: print(
+        f"оплачен: {r['id'][:8]} · {_money_fmt(r['amount'])} · {r['paid_at']}"))
+
+
+def cmd_money_rm(client, args):
+    p = resolve_payment(client, args.id)
+    if not args.yes:
+        die(f"добавь --yes, чтобы убрать платёж {p['id'][:8]} ({_money_fmt(p['amount'])}, {p['title']})")
+    client.call("DELETE", f"/finance/payments/{p['id']}")
+    print(f"платёж убран: {p['id'][:8]} · {p['title']}")
+
+
+def cmd_money_contract_add(client, args):
+    project = resolve_project(client, args.project)
+    body = {"title": args.title, "kind": args.kind}
+    for field, value in (("amount", args.amount), ("rate", args.rate)):
+        if value is not None:
+            body[field] = str(value)
+    for field, value in (("signed_at", args.signed), ("start_date", args.start), ("end_date", args.end)):
+        if value:
+            body[field] = _due_date_only(value)
+    if args.doc:
+        body["doc_url"] = args.doc
+    if args.note:
+        body["note"] = args.note
+    c = client.call("POST", f"/projects/{project['id']}/contracts", body)
+    out(c, args.json, lambda c: print(
+        f"договор заведён: {c['id'][:8]} · {project['code']} · {c['title']} · {c['kind']}"))
+
+
+def cmd_money_contracts(client, args):
+    project = resolve_project(client, args.project)
+    rows = client.call("GET", f"/projects/{project['id']}/contracts")
+    if args.json:
+        out(rows, True, None)
+        return
+    if not rows:
+        print(f"договоров нет: {project['code']}")
+        return
+    for c in rows:
+        amount = _money_fmt(c["amount"]) if c.get("amount") else (
+            _money_fmt(c["rate"]) + "/ед." if c.get("rate") else "сумма не задана")
+        print(f"{c['id'][:8]}  {c['kind']:<9} {amount:>16}  {c['title']}")
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -454,7 +879,17 @@ def build_parser() -> argparse.ArgumentParser:
     sub = p.add_subparsers(dest="cmd", required=True)
 
     sub.add_parser("whoami").set_defaults(fn=cmd_whoami)
-    sub.add_parser("projects").set_defaults(fn=cmd_projects)
+    sp = sub.add_parser("projects", help="list projects")
+    sp.add_argument("--archived", action="store_true", help="include archived projects")
+    sp.set_defaults(fn=cmd_projects)
+
+    sp = sub.add_parser("project-add", help="create a project")
+    sp.add_argument("--code", required=True,
+                    help="short key, e.g. AXM — becomes task keys AXM-1 and the /projects/axm link; cannot be changed later")
+    sp.add_argument("--name", required=True)
+    sp.add_argument("--group", help="portfolio group, e.g. Клиентские")
+    sp.add_argument("--goal")
+    sp.set_defaults(fn=cmd_project_add)
 
     sp = sub.add_parser("list", help="list tasks in a project")
     sp.add_argument("--project", required=True)
@@ -470,16 +905,18 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--title", required=True)
     sp.add_argument("--desc")
     sp.add_argument("--priority", choices=["CRITICAL", "HIGH", "MEDIUM", "LOW", "NONE"])
+    sp.add_argument("--due", metavar="WHEN", help=DUE_HELP)
     sp.add_argument("--assignee", help="email or name")
     sp.add_argument("--attach", action="append", metavar="FILE",
                     help="прикрепить файл к задаче (можно повторять), напр. скриншот")
     sp.set_defaults(fn=cmd_add)
 
-    sp = sub.add_parser("edit", help="update title/description/priority of an existing task")
+    sp = sub.add_parser("edit", help="update title/description/priority/due of an existing task")
     sp.add_argument("key")
     sp.add_argument("--title")
     sp.add_argument("--desc")
     sp.add_argument("--priority", choices=["CRITICAL", "HIGH", "MEDIUM", "LOW", "NONE"])
+    sp.add_argument("--due", metavar="WHEN", help=DUE_HELP + ". none — снять срок")
     sp.set_defaults(fn=cmd_edit)
 
     sp = sub.add_parser("attach", help="attach file(s) to an existing task")
@@ -506,10 +943,94 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--to", required=True, help="email or name")
     sp.set_defaults(fn=cmd_assign)
 
+    sp = sub.add_parser("members", help="list project members")
+    sp.add_argument("--project", required=True)
+    sp.set_defaults(fn=cmd_members)
+
+    sp = sub.add_parser("member-add", help="give a user access to a project (or to all of them)")
+    sp.add_argument("--user", required=True, help="email or name")
+    sp.add_argument("--project", help="one project; omit to apply to every project")
+    sp.add_argument("--role", default="MEMBER", choices=PROJECT_ROLES,
+                    help="role inside the project (default MEMBER)")
+    sp.add_argument("--archived", action="store_true",
+                    help="with no --project: cover archived projects too")
+    sp.set_defaults(fn=cmd_member_add)
+
+    sp = sub.add_parser("member-rm", help="revoke a user's access to a project (or to all)")
+    sp.add_argument("--user", required=True, help="email or name")
+    sp.add_argument("--project", help="one project; omit to apply to every project")
+    sp.add_argument("--archived", action="store_true")
+    sp.add_argument("--yes", action="store_true", help="required when no --project is given")
+    sp.set_defaults(fn=cmd_member_rm)
+
     sp = sub.add_parser("rm", help="delete a task")
     sp.add_argument("key")
     sp.add_argument("--yes", action="store_true")
     sp.set_defaults(fn=cmd_rm)
+
+    # ---- money: деньги проектов -------------------------------------------
+    sp = sub.add_parser("money", help="деньги: платежи, счета, договоры")
+    msub = sp.add_subparsers(dest="money_cmd", required=True)
+
+    m = msub.add_parser("list", help="платежи проекта или всего портфеля")
+    m.add_argument("--project", help="код проекта; без него — все проекты")
+    m.add_argument("--status", choices=["EXPECTED", "INVOICED", "PAID", "CANCELLED"])
+    m.add_argument("--all", action="store_true", help="включая оплаченные")
+    m.set_defaults(fn=cmd_money_list)
+
+    m = msub.add_parser("calendar", help="календарь платежей и прогноз")
+    m.add_argument("--weeks", type=int, default=4, help="горизонт прогноза, недель")
+    m.set_defaults(fn=cmd_money_calendar)
+
+    m = msub.add_parser("add", help="завести ожидаемый платёж")
+    m.add_argument("--project", required=True)
+    m.add_argument("--title", required=True)
+    m.add_argument("--amount", required=True)
+    m.add_argument("--kind", default="MILESTONE",
+                   choices=["PREPAY", "MILESTONE", "RETAINER", "HOURLY", "EXTRA"])
+    m.add_argument("--due", metavar="WHEN", help=DUE_HELP)
+    m.add_argument("--initiative", help="id вехи, к которой привязан платёж")
+    m.add_argument("--contract", help="id договора")
+    m.add_argument("--invoice", help="номер счёта, если уже выставлен")
+    m.add_argument("--doc", help="ссылка на документ в Drive")
+    m.add_argument("--note")
+    m.set_defaults(fn=cmd_money_add)
+
+    m = msub.add_parser("invoice", help="отметить, что счёт выставлен")
+    m.add_argument("id", help="первые знаки id платежа")
+    m.add_argument("--no", help="номер счёта")
+    m.add_argument("--date", help="дата выставления (по умолчанию сегодня)")
+    m.add_argument("--due", help="срок оплаты")
+    m.set_defaults(fn=cmd_money_invoice)
+
+    m = msub.add_parser("paid", help="отметить оплату")
+    m.add_argument("id")
+    m.add_argument("--date", help="дата оплаты (по умолчанию сегодня)")
+    m.add_argument("--amount", help="если пришла другая сумма")
+    m.add_argument("--act", help="номер акта")
+    m.set_defaults(fn=cmd_money_paid)
+
+    m = msub.add_parser("rm", help="убрать платёж (мягко, история остаётся)")
+    m.add_argument("id")
+    m.add_argument("--yes", action="store_true")
+    m.set_defaults(fn=cmd_money_rm)
+
+    m = msub.add_parser("contracts", help="договоры проекта")
+    m.add_argument("--project", required=True)
+    m.set_defaults(fn=cmd_money_contracts)
+
+    m = msub.add_parser("contract-add", help="завести договор")
+    m.add_argument("--project", required=True)
+    m.add_argument("--title", required=True)
+    m.add_argument("--kind", default="FIXED", choices=["FIXED", "MILESTONE", "RETAINER", "HOURLY"])
+    m.add_argument("--amount")
+    m.add_argument("--rate", help="ставка за час или месяц")
+    m.add_argument("--signed", help="дата подписания")
+    m.add_argument("--start")
+    m.add_argument("--end")
+    m.add_argument("--doc", help="ссылка на документ в Drive")
+    m.add_argument("--note")
+    m.set_defaults(fn=cmd_money_contract_add)
 
     return p
 

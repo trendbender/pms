@@ -68,14 +68,26 @@ docker compose up -d --build      # migrations run automatically on backend star
 
 ## 5. Backups
 
-Back up the Postgres volume regularly. A simple cron job:
+`deploy/backup-db.sh` dumps the database and archives the attachments volume,
+then prunes anything older than `KEEP_DAYS` (default 14). It writes to a
+temporary `.part` file and verifies the gzip before rotating, so a failed run
+never destroys the previous backups. Install it as a daily cron job:
 
 ```bash
-docker compose exec -T postgres pg_dump -U "$POSTGRES_USER" "$POSTGRES_DB" \
-  | gzip > "pms-$(date +%F).sql.gz"
+30 3 * * * /srv/projects/pms/deploy/backup-db.sh >> /var/log/pms-backup.log 2>&1
 ```
 
-Keep backups off-host, and test a restore before you rely on them.
+Credentials are read from the prod `.env`, never passed on the command line.
+Override `BACKUP_DIR` (default `/srv/backups/pms`), `KEEP_DAYS` or `COMPOSE_FILE`
+through the environment.
+
+Restore:
+
+```bash
+gunzip -c /srv/backups/pms/pms-<stamp>.sql.gz | docker compose exec -T postgres psql -U "$POSTGRES_USER" -d "$POSTGRES_DB"
+```
+
+Keep a copy off-host, and test a restore before you rely on it.
 
 ## Notes
 

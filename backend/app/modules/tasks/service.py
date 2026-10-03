@@ -166,15 +166,16 @@ async def create_task(
     number = project.task_counter
     key = f"{project.code}-{number}"
 
-    # place at the TOP of the target column (fractional ordering): the board sorts
-    # by ascending position, so a value below the current minimum floats it up.
-    min_pos = await db.scalar(
+    # append to the BOTTOM of the target column (fractional ordering): the board
+    # sorts by ascending position, so a value above the current maximum sinks it
+    # to the end and the column reads in creation order until someone reorders it.
+    max_pos = await db.scalar(
         select(Task.position)
         .where(Task.status_id == status_id, Task.deleted_at.is_(None))
-        .order_by(Task.position.asc())
+        .order_by(Task.position.desc())
         .limit(1)
     )
-    position = float(min_pos) - 1000 if min_pos is not None else 1000.0
+    position = float(max_pos) + 1000 if max_pos is not None else 1000.0
 
     task = Task(
         workspace_id=project.workspace_id,

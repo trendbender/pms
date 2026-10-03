@@ -166,6 +166,7 @@ so every project has one live log a human and an agent share:
 
 ```bash
 pms.py projects
+pms.py project-add --code ABC --name "Acme website" --group Clients
 pms.py add --project ABC --title "Fix the contact form" --priority HIGH
 pms.py status ABC-12 "In Progress"
 pms.py comment ABC-12 "deployed, waiting for review"

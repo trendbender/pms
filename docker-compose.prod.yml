@@ -69,6 +69,9 @@ services:
       dockerfile: Dockerfile.prod
       args:
         NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL}
+        NEXT_PUBLIC_BRAND_NAME: ${NEXT_PUBLIC_BRAND_NAME:-}
+        NEXT_PUBLIC_BRAND_BADGE: ${NEXT_PUBLIC_BRAND_BADGE:-}
+        NEXT_PUBLIC_BRAND_URL: ${NEXT_PUBLIC_BRAND_URL:-}
     depends_on:
       - backend
     ports:

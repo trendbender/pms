@@ -1,7 +1,7 @@
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -18,6 +18,7 @@ from app.models.task import TaskStatus, TaskType
 from app.models.user import User
 from app.models.workspace import WorkspaceMember
 from app.modules.audit.service import record_audit
+from app.modules.permissions import service as perms
 from app.modules.permissions.constants import Perm
 from app.modules.projects import service
 from app.modules.projects.schemas import (
@@ -44,11 +45,14 @@ router = APIRouter(prefix="/projects", tags=["projects"])
 
 @router.get("", response_model=list[ProjectOut])
 async def list_projects(
+    include_archived: bool = False,
     user: User = Depends(get_current_user),
     workspace_id: UUID = Depends(get_workspace_id),
     db: AsyncSession = Depends(get_db),
 ) -> list[Project]:
-    return await service.list_visible_projects(db, user.id, workspace_id)
+    return await service.list_visible_projects(
+        db, user.id, workspace_id, include_archived=include_archived
+    )
 
 
 @router.post("", response_model=ProjectOut, status_code=status.HTTP_201_CREATED)
@@ -94,6 +98,33 @@ async def create_project(
         target_id=project.id,
         data={"code": project.code, "name": project.name},
     )
+    return project
+
+
+@router.get("/by-code/{code}", response_model=ProjectOut)
+async def get_project_by_code(
+    code: str,
+    user: User = Depends(get_current_user),
+    workspace_id: UUID = Depends(get_workspace_id),
+    db: AsyncSession = Depends(get_db),
+) -> Project:
+    """Resolve a project by its human code (alias), e.g. `MUR` — case-insensitive.
+
+    Backs the readable `/projects/mur` links in the UI. Same §7 visibility rule as
+    load_project: no access -> 404, never 403.
+    """
+    project = await db.scalar(
+        select(Project).where(
+            Project.workspace_id == workspace_id,
+            func.upper(Project.code) == code.strip().upper(),
+        )
+    )
+    if project is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Project not found")
+    if not await perms.has_project_permission(
+        db, user.id, workspace_id, project.id, Perm.PROJECT_VIEW
+    ):
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Project not found")
     return project
 
 
@@ -157,6 +188,31 @@ async def archive_project(
         workspace_id=workspace_id,
         actor_id=user.id,
         action="project.archived",
+        target_type="project",
+        target_id=project.id,
+    )
+    await db.flush()
+    return project
+
+
+@router.post("/{project_id}/unarchive", response_model=ProjectOut)
+async def unarchive_project(
+    project_id: UUID,
+    user: User = Depends(get_current_user),
+    workspace_id: UUID = Depends(get_workspace_id),
+    _: None = Depends(require_project_permission(Perm.PROJECT_ARCHIVE)),
+    db: AsyncSession = Depends(get_db),
+) -> Project:
+    """Take a project back out of the archive (returns it to ACTIVE)."""
+    project = await db.get(Project, project_id)
+    assert project is not None
+    project.status = "ACTIVE"
+    project.archived_at = None
+    await record_audit(
+        db,
+        workspace_id=workspace_id,
+        actor_id=user.id,
+        action="project.unarchived",
         target_type="project",
         target_id=project.id,
     )

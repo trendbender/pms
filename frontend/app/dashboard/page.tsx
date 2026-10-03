@@ -2,7 +2,14 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { ApiError, Portfolio, PortfolioRow, clearTokens, getPortfolio } from "@/lib/api";
+import {
+  ApiError,
+  Portfolio,
+  PortfolioRow,
+  clearTokens,
+  getPortfolio,
+  projectSlug,
+} from "@/lib/api";
 import { useT } from "@/lib/locale";
 
 function buildGroups(rows: PortfolioRow[]): { group: string; rows: PortfolioRow[] }[] {
@@ -110,7 +117,7 @@ export default function DashboardPage() {
                       return (
                         <tr
                           key={r.project_id}
-                          onClick={() => router.push(`/projects/${r.project_id}`)}
+                          onClick={() => router.push(`/projects/${projectSlug(r.code)}`)}
                           className="cursor-pointer border-t border-slate-100 hover:bg-slate-50"
                         >
                           <td className="px-5 py-2.5">

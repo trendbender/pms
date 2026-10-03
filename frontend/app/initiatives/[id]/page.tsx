@@ -12,6 +12,7 @@ import {
   getInitiative,
   getProject,
   listInitiativeTasks,
+  projectSlug,
   updateInitiative,
 } from "@/lib/api";
 import { useT } from "@/lib/locale";
@@ -118,7 +119,9 @@ export default function InitiativePage() {
     <main className="mx-auto max-w-4xl p-8">
       <div className="flex items-center gap-3 text-sm">
         <Link
-          href={`/projects/${initiative.project_id}`}
+          href={`/projects/${
+            project ? projectSlug(project.code) : initiative.project_id
+          }`}
           className="text-muted hover:underline"
         >
           {project ? project.name : t("initiative.back")}

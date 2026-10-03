@@ -12,7 +12,7 @@ import {
   clearTokens,
   createTask,
   getBoard,
-  getProject,
+  getProjectByRef,
   moveTask,
 } from "@/lib/api";
 import { useT } from "@/lib/locale";
@@ -28,7 +28,9 @@ const PRIORITY_STYLES: Record<string, string> = {
 export default function ProjectBoardPage() {
   const router = useRouter();
   const t = useT();
-  const { id } = useParams<{ id: string }>();
+  // The route param is a project *alias* (its code, e.g. "mur"); a UUID still
+  // resolves, so links shared before aliases keep working.
+  const { id: ref } = useParams<{ id: string }>();
   const [board, setBoard] = useState<Board | null>(null);
   const [project, setProject] = useState<Project | null>(null);
   const [title, setTitle] = useState("");
@@ -39,9 +41,9 @@ export default function ProjectBoardPage() {
 
   const refresh = useCallback(async () => {
     try {
-      const [b, p] = await Promise.all([getBoard(id), getProject(id)]);
-      setBoard(b);
+      const p = await getProjectByRef(ref);
       setProject(p);
+      setBoard(await getBoard(p.id));
     } catch (err) {
       if (err instanceof ApiError && err.status === 401) {
         clearTokens();
@@ -50,7 +52,7 @@ export default function ProjectBoardPage() {
         setError(t("board.notFound"));
       }
     }
-  }, [id, router, t]);
+  }, [ref, router, t]);
 
   useEffect(() => {
     refresh();
@@ -58,11 +60,11 @@ export default function ProjectBoardPage() {
 
   async function onCreate(e: React.FormEvent) {
     e.preventDefault();
-    if (!title.trim()) return;
+    if (!title.trim() || !project) return;
     setError(null);
     setLoading(true);
     try {
-      await createTask({ project_id: id, title: title.trim() });
+      await createTask({ project_id: project.id, title: title.trim() });
       setTitle("");
       await refresh();
     } catch (err) {
@@ -127,10 +129,16 @@ export default function ProjectBoardPage() {
         <nav className="mt-3 flex gap-4 border-b border-slate-200 text-sm">
           <span className="border-b-2 border-ink pb-2 font-medium">{t("board.board")}</span>
           <Link
-            href={`/projects/${id}/sprints`}
+            href={`/projects/${ref}/sprints`}
             className="pb-2 text-muted hover:text-ink"
           >
             {t("board.sprints")}
+          </Link>
+          <Link
+            href={`/projects/${ref}/settings`}
+            className="pb-2 text-muted hover:text-ink"
+          >
+            {t("board.settings")}
           </Link>
         </nav>
       </header>

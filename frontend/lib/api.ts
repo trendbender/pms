@@ -216,14 +216,20 @@ export interface Project {
   id: string;
   name: string;
   code: string;
+  description: string | null;
   goal: string | null;
   status: string;
   health: string;
   group_name: string | null;
+  owner_id: string | null;
   wip_limit: number | null;
+  archived_at: string | null;
 }
 
-export const listProjects = () => api<Project[]>("/projects");
+// Archived projects are hidden unless explicitly asked for (same rule on the
+// portfolio dashboard, which never shows them).
+export const listProjects = (includeArchived = false) =>
+  api<Project[]>(`/projects${includeArchived ? "?include_archived=true" : ""}`);
 
 export const createProject = (input: {
   name: string;
@@ -234,6 +240,42 @@ export const createProject = (input: {
   api<Project>("/projects", { method: "POST", body: JSON.stringify(input) });
 
 export const getProject = (id: string) => api<Project>(`/projects/${id}`);
+
+export interface ProjectPatch {
+  name?: string;
+  description?: string;
+  goal?: string;
+  group_name?: string;
+  status?: string;
+  health?: string;
+  wip_limit?: number | null;
+  owner_id?: string;
+}
+
+export const updateProject = (id: string, patch: ProjectPatch) =>
+  api<Project>(`/projects/${id}`, { method: "PATCH", body: JSON.stringify(patch) });
+
+export const archiveProject = (id: string) =>
+  api<Project>(`/projects/${id}/archive`, { method: "POST", body: "{}" });
+
+export const unarchiveProject = (id: string) =>
+  api<Project>(`/projects/${id}/unarchive`, { method: "POST", body: "{}" });
+
+// Readable project links: URLs carry the project code (/projects/mur) instead of
+// a UUID. `ref` is whichever the route supplied; UUIDs still resolve, so old
+// links keep working.
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+export const isUuid = (ref: string) => UUID_RE.test(ref);
+
+// URL form of a project alias — lowercase code, e.g. "mur".
+export const projectSlug = (code: string) => code.toLowerCase();
+
+export const getProjectByCode = (code: string) =>
+  api<Project>(`/projects/by-code/${encodeURIComponent(code)}`);
+
+export const getProjectByRef = (ref: string) =>
+  isUuid(ref) ? getProject(ref) : getProjectByCode(ref);
 
 // ---- Sprint 3: tasks ----
 

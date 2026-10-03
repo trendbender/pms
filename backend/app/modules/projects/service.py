@@ -9,6 +9,7 @@ from app.models.enums import (
     DEFAULT_STATUSES,
     DEFAULT_TYPES,
     ProjectRole,
+    ProjectStatus,
     SystemRole,
 )
 from app.models.project import Project, ProjectMember
@@ -78,9 +79,14 @@ async def create_project(
 
 
 async def list_visible_projects(
-    db: AsyncSession, user_id: UUID, workspace_id: UUID
+    db: AsyncSession, user_id: UUID, workspace_id: UUID, *, include_archived: bool = True
 ) -> list[Project]:
-    """Projects the user may see: all (workspace Owner/Admin) or those they belong to."""
+    """Projects the user may see: all (workspace Owner/Admin) or those they belong to.
+
+    `include_archived=False` drops ARCHIVED ones — used by the project list and the
+    portfolio, where an archived project should be out of the way. Task-scoping
+    callers keep the default so history in archived projects stays reachable.
+    """
     sys_role = await db.scalar(
         select(WorkspaceMember.system_role).where(
             WorkspaceMember.user_id == user_id,
@@ -93,5 +99,7 @@ async def list_visible_projects(
             ProjectMember.user_id == user_id
         )
         stmt = stmt.where(Project.id.in_(member_project_ids))
+    if not include_archived:
+        stmt = stmt.where(Project.status != ProjectStatus.ARCHIVED.value)
     stmt = stmt.order_by(Project.created_at.desc())
     return list((await db.scalars(stmt)).all())

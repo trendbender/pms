@@ -32,6 +32,7 @@ import {
   listAttachments,
   listStatuses,
   listUsers,
+  projectSlug,
   updateTask,
   uploadAttachment,
 } from "@/lib/api";
@@ -77,6 +78,10 @@ export default function TaskPage() {
   const [dropActive, setDropActive] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
+
+  // Breadcrumb / post-delete redirect: prefer the readable project alias (its
+  // code), fall back to the UUID until the project has loaded.
+  const projectHref = project ? projectSlug(project.code) : (task?.project_id ?? "");
 
   const load = useCallback(async () => {
     try {
@@ -201,7 +206,7 @@ export default function TaskPage() {
     setError(null);
     try {
       await deleteTask(task.id);
-      router.push(`/projects/${task.project_id}`);
+      router.push(`/projects/${projectHref}`);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Delete failed");
       setBusy(false);
@@ -220,7 +225,7 @@ export default function TaskPage() {
   return (
     <main className="mx-auto max-w-5xl p-6">
       <div className="flex items-center gap-2 text-sm">
-        <Link href={`/projects/${task.project_id}`} className="text-muted hover:underline">
+        <Link href={`/projects/${projectHref}`} className="text-muted hover:underline">
           ← {project ? `${project.code} ${project.name}` : t("board.board")}
         </Link>
         <span className="text-slate-300">/</span>

@@ -11,6 +11,7 @@ import {
   completeSprint,
   createSprint,
   getBacklog,
+  getProjectByRef,
   listSprints,
   startSprint,
 } from "@/lib/api";
@@ -34,7 +35,9 @@ const PRIORITY_STYLES: Record<string, string> = {
 export default function SprintsPage() {
   const router = useRouter();
   const t = useT();
-  const { id } = useParams<{ id: string }>();
+  // Alias route param (project code, e.g. "mur"); UUIDs still resolve.
+  const { id: ref } = useParams<{ id: string }>();
+  const [projectId, setProjectId] = useState<string | null>(null);
   const [sprints, setSprints] = useState<Sprint[]>([]);
   const [backlog, setBacklog] = useState<Task[]>([]);
   const [name, setName] = useState("");
@@ -44,7 +47,9 @@ export default function SprintsPage() {
 
   const refresh = useCallback(async () => {
     try {
-      const [s, b] = await Promise.all([listSprints(id), getBacklog(id)]);
+      const p = await getProjectByRef(ref);
+      setProjectId(p.id);
+      const [s, b] = await Promise.all([listSprints(p.id), getBacklog(p.id)]);
       setSprints(s);
       setBacklog(b);
     } catch (err) {
@@ -55,7 +60,7 @@ export default function SprintsPage() {
         setError(t("board.notFound"));
       }
     }
-  }, [id, router, t]);
+  }, [ref, router, t]);
 
   useEffect(() => {
     refresh();
@@ -63,11 +68,11 @@ export default function SprintsPage() {
 
   async function onCreate(e: React.FormEvent) {
     e.preventDefault();
-    if (!name.trim()) return;
+    if (!name.trim() || !projectId) return;
     setError(null);
     setBusy("create");
     try {
-      await createSprint(id, { name: name.trim(), goal: goal.trim() || undefined });
+      await createSprint(projectId, { name: name.trim(), goal: goal.trim() || undefined });
       setName("");
       setGoal("");
       await refresh();
@@ -96,10 +101,16 @@ export default function SprintsPage() {
       <header>
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3 text-sm">
-            <Link href={`/projects/${id}`} className="text-muted hover:underline">
+            <Link href={`/projects/${ref}`} className="text-muted hover:underline">
               {t("board.board")}
             </Link>
             <span className="font-medium text-ink">{t("board.sprints")}</span>
+            <Link
+              href={`/projects/${ref}/settings`}
+              className="text-muted hover:underline"
+            >
+              {t("board.settings")}
+            </Link>
           </div>
         </div>
         <h1 className="mt-2 text-2xl font-semibold">{t("sprints.title")}</h1>

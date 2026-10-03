@@ -9,6 +9,7 @@ import {
   clearTokens,
   createProject,
   listProjects,
+  projectSlug,
 } from "@/lib/api";
 import { useT } from "@/lib/locale";
 
@@ -28,10 +29,11 @@ export default function ProjectsPage() {
   const [group, setGroup] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [showArchived, setShowArchived] = useState(false);
 
-  async function refresh() {
+  async function refresh(archived = showArchived) {
     try {
-      setProjects(await listProjects());
+      setProjects(await listProjects(archived));
     } catch (err) {
       if (err instanceof ApiError && err.status === 401) {
         clearTokens();
@@ -72,7 +74,18 @@ export default function ProjectsPage() {
     <main className="mx-auto max-w-4xl p-8">
       <header className="flex items-center justify-between">
         <h1 className="text-2xl font-semibold">{t("projects.title")}</h1>
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-4">
+          <label className="flex items-center gap-2 text-sm text-muted">
+            <input
+              type="checkbox"
+              checked={showArchived}
+              onChange={(e) => {
+                setShowArchived(e.target.checked);
+                refresh(e.target.checked);
+              }}
+            />
+            {t("projects.showArchived")}
+          </label>
           <Link href="/dashboard" className="text-sm text-muted hover:underline">
             {t("projects.back")}
           </Link>
@@ -141,12 +154,13 @@ export default function ProjectsPage() {
               <th className="px-4 py-2 font-medium">{t("table.goal")}</th>
               <th className="px-4 py-2 font-medium">{t("table.health")}</th>
               <th className="px-4 py-2 font-medium">{t("table.status")}</th>
+              <th className="px-4 py-2" />
             </tr>
           </thead>
           <tbody>
             {projects.length === 0 && (
               <tr>
-                <td colSpan={5} className="px-4 py-6 text-center text-muted">
+                <td colSpan={6} className="px-4 py-6 text-center text-muted">
                   {t("projects.empty")}
                 </td>
               </tr>
@@ -154,8 +168,10 @@ export default function ProjectsPage() {
             {projects.map((p) => (
               <tr
                 key={p.id}
-                onClick={() => router.push(`/projects/${p.id}`)}
-                className="cursor-pointer border-t border-slate-100 hover:bg-slate-50"
+                onClick={() => router.push(`/projects/${projectSlug(p.code)}`)}
+                className={`cursor-pointer border-t border-slate-100 hover:bg-slate-50 ${
+                  p.status === "ARCHIVED" ? "opacity-60" : ""
+                }`}
               >
                 <td className="px-4 py-2 font-mono text-xs">{p.code}</td>
                 <td className="px-4 py-2 font-medium text-ink hover:underline">{p.name}</td>
@@ -170,6 +186,15 @@ export default function ProjectsPage() {
                   </span>
                 </td>
                 <td className="px-4 py-2 text-muted">{p.status}</td>
+                <td className="px-4 py-2 text-right">
+                  <Link
+                    href={`/projects/${projectSlug(p.code)}/settings`}
+                    onClick={(e) => e.stopPropagation()}
+                    className="text-xs text-muted hover:underline"
+                  >
+                    {t("board.settings")}
+                  </Link>
+                </td>
               </tr>
             ))}
           </tbody>

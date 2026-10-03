@@ -105,6 +105,31 @@ async def test_manager_can_create_and_owns_it(client, session):
     assert got.status_code == 200
 
 
+@pytest.mark.asyncio
+async def test_lookup_by_code_alias(client, session):
+    ws = await make_workspace(session)
+    await make_user(session, ws, "owner@ex.com", SystemRole.OWNER)
+    await make_user(session, ws, "out@ex.com", SystemRole.MEMBER)
+    await session.commit()
+    tok = await _token(client, "owner@ex.com")
+    proj = await _make_project(client, tok, code="MUR")
+
+    # readable links use the lowercase code — lookup is case-insensitive
+    got = await client.get("/projects/by-code/mur", headers=_auth(tok))
+    assert got.status_code == 200
+    assert got.json()["id"] == proj["id"]
+
+    assert (
+        await client.get("/projects/by-code/NOPE", headers=_auth(tok))
+    ).status_code == 404
+
+    # same §7 rule as by-id: no access -> 404, existence isn't leaked
+    out_tok = await _token(client, "out@ex.com")
+    assert (
+        await client.get("/projects/by-code/MUR", headers=_auth(out_tok))
+    ).status_code == 404
+
+
 # --------------------------------------------------------------------------- #
 # Visibility (spec §7)
 # --------------------------------------------------------------------------- #
@@ -180,6 +205,44 @@ async def test_archive_project(client, session):
     assert r.status_code == 200
     assert r.json()["status"] == "ARCHIVED"
     assert r.json()["archived_at"] is not None
+
+    # out of the way by default: hidden from the project list and the portfolio
+    listed = await client.get("/projects", headers=_auth(tok))
+    assert [p["id"] for p in listed.json()] == []
+    portfolio = await client.get("/portfolio", headers=_auth(tok))
+    assert portfolio.json()["rows"] == []
+
+    with_archived = await client.get("/projects?include_archived=true", headers=_auth(tok))
+    assert [p["id"] for p in with_archived.json()] == [proj["id"]]
+
+    # ...and back out of the archive
+    back = await client.post(f"/projects/{proj['id']}/unarchive", headers=_auth(tok))
+    assert back.status_code == 200
+    assert back.json()["status"] == "ACTIVE"
+    assert back.json()["archived_at"] is None
+    listed = await client.get("/projects", headers=_auth(tok))
+    assert [p["id"] for p in listed.json()] == [proj["id"]]
+
+
+@pytest.mark.asyncio
+async def test_member_cannot_archive(client, session):
+    ws = await make_workspace(session)
+    await make_user(session, ws, "owner@ex.com", SystemRole.OWNER)
+    dev = await make_user(session, ws, "dev@ex.com", SystemRole.MEMBER)
+    await session.commit()
+    owner_tok = await _token(client, "owner@ex.com")
+    proj = await _make_project(client, owner_tok, code="ARC2")
+    await client.post(
+        f"/projects/{proj['id']}/members",
+        headers=_auth(owner_tok),
+        json={"user_id": str(dev.id), "role": "MEMBER"},
+    )
+
+    dev_tok = await _token(client, "dev@ex.com")
+    r = await client.post(f"/projects/{proj['id']}/archive", headers=_auth(dev_tok))
+    assert r.status_code == 403
+    r = await client.post(f"/projects/{proj['id']}/unarchive", headers=_auth(dev_tok))
+    assert r.status_code == 403
 
 
 # --------------------------------------------------------------------------- #

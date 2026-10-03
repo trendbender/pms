@@ -197,7 +197,8 @@ async def _sprint_progress(
 
 
 async def portfolio(db: AsyncSession, user_id: UUID, workspace_id: UUID) -> PortfolioOut:
-    projects = await list_visible_projects(db, user_id, workspace_id)
+    # archived projects are out of the operational picture
+    projects = await list_visible_projects(db, user_id, workspace_id, include_archived=False)
     ids = [p.id for p in projects]
     if not ids:
         return PortfolioOut(rows=[], totals=PortfolioTotals())

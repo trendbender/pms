@@ -15,12 +15,15 @@ export function NavGate() {
     | "myReviews"
     | "allTasks"
     | "projects"
+    | "users"
     | undefined;
   if (path.startsWith("/dashboard")) active = "dashboard";
   else if (path.startsWith("/my-tasks")) active = "myTasks";
   else if (path.startsWith("/my-reviews")) active = "myReviews";
   else if (path.startsWith("/all-tasks")) active = "allTasks";
-  else if (path.startsWith("/projects") || path.startsWith("/tasks")) active = "projects";
+  else if (path.startsWith("/projects") || path.startsWith("/tasks") || path.startsWith("/t/"))
+    active = "projects";
+  else if (path.startsWith("/users")) active = "users";
 
   return <AppNav active={active} />;
 }

@@ -17,7 +17,6 @@ import {
   removeMember,
   updateUser,
 } from "@/lib/api";
-import { AppNav } from "@/components/AppNav";
 
 // System roles (workspace-level). OWNER/ADMIN are superusers on every project.
 const SYSTEM_ROLES = ["MEMBER", "MANAGER", "ADMIN", "VIEWER", "GUEST", "OWNER"];
@@ -165,181 +164,175 @@ export default function UsersPage() {
   if (!ready) return <main className="p-8 text-sm text-muted">Загрузка…</main>;
   if (!isAdmin) {
     return (
-      <>
-        <AppNav />
-        <main className="mx-auto max-w-3xl p-8">
-          <p className="text-sm text-red-600">
-            Недостаточно прав. Управление пользователями доступно только владельцу и админам воркспейса.
-          </p>
-        </main>
-      </>
+      <main className="mx-auto max-w-3xl p-8">
+        <p className="text-sm text-red-600">
+          Недостаточно прав. Управление пользователями доступно только владельцу и админам воркспейса.
+        </p>
+      </main>
     );
   }
 
   return (
-    <>
-      <AppNav active="users" />
-      <main className="mx-auto max-w-5xl p-6">
-        <h1 className="text-2xl font-semibold">Пользователи</h1>
-        <p className="mt-1 text-sm text-muted">
-          Приглашение сотрудников, системные роли и доступ к проектам. OWNER/ADMIN — суперпользователи
-          на всех проектах; остальным доступ выдаётся по проектам ниже.
-        </p>
+    <main className="mx-auto max-w-5xl p-6">
+      <h1 className="text-2xl font-semibold">Пользователи</h1>
+      <p className="mt-1 text-sm text-muted">
+        Приглашение сотрудников, системные роли и доступ к проектам. OWNER/ADMIN — суперпользователи
+        на всех проектах; остальным доступ выдаётся по проектам ниже.
+      </p>
 
-        {error && <p className="mt-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
+      {error && <p className="mt-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
 
-        {/* invite */}
-        <form
-          onSubmit={onInvite}
-          className="mt-5 flex flex-wrap items-end gap-3 rounded-xl border border-slate-200 bg-white p-4"
-        >
-          <div>
-            <label className="mb-1 block text-xs font-medium text-muted">Имя</label>
-            <input
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              placeholder="Антон"
-              className="w-40 rounded-lg border border-slate-300 px-3 py-2 text-sm"
-            />
-          </div>
-          <div>
-            <label className="mb-1 block text-xs font-medium text-muted">Email</label>
-            <input
-              type="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              placeholder="anton@example.com"
-              className="w-56 rounded-lg border border-slate-300 px-3 py-2 text-sm"
-            />
-          </div>
-          <div>
-            <label className="mb-1 block text-xs font-medium text-muted">Системная роль</label>
-            <select
-              value={role}
-              onChange={(e) => setRole(e.target.value)}
-              className="rounded-lg border border-slate-300 px-2.5 py-2 text-sm"
-            >
-              {SYSTEM_ROLES.map((r) => (
-                <option key={r} value={r}>
-                  {r}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div>
-            <label className="mb-1 block text-xs font-medium text-muted">Пароль (мин. 8)</label>
-            <input
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              placeholder="временный"
-              className="w-40 rounded-lg border border-slate-300 px-3 py-2 text-sm"
-            />
-          </div>
-          <button
-            type="submit"
-            disabled={busy}
-            className="rounded-lg bg-ink px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
+      {/* invite */}
+      <form
+        onSubmit={onInvite}
+        className="mt-5 flex flex-wrap items-end gap-3 rounded-xl border border-slate-200 bg-white p-4"
+      >
+        <div>
+          <label className="mb-1 block text-xs font-medium text-muted">Имя</label>
+          <input
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder="Антон"
+            className="w-40 rounded-lg border border-slate-300 px-3 py-2 text-sm"
+          />
+        </div>
+        <div>
+          <label className="mb-1 block text-xs font-medium text-muted">Email</label>
+          <input
+            type="email"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            placeholder="anton@example.com"
+            className="w-56 rounded-lg border border-slate-300 px-3 py-2 text-sm"
+          />
+        </div>
+        <div>
+          <label className="mb-1 block text-xs font-medium text-muted">Системная роль</label>
+          <select
+            value={role}
+            onChange={(e) => setRole(e.target.value)}
+            className="rounded-lg border border-slate-300 px-2.5 py-2 text-sm"
           >
-            Пригласить
-          </button>
-        </form>
-        {inviteMsg && <p className="mt-2 text-sm text-green-700">{inviteMsg}</p>}
+            {SYSTEM_ROLES.map((r) => (
+              <option key={r} value={r}>
+                {r}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div>
+          <label className="mb-1 block text-xs font-medium text-muted">Пароль (мин. 8)</label>
+          <input
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            placeholder="временный"
+            className="w-40 rounded-lg border border-slate-300 px-3 py-2 text-sm"
+          />
+        </div>
+        <button
+          type="submit"
+          disabled={busy}
+          className="rounded-lg bg-ink px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
+        >
+          Пригласить
+        </button>
+      </form>
+      {inviteMsg && <p className="mt-2 text-sm text-green-700">{inviteMsg}</p>}
 
-        {/* users table */}
-        <div className="mt-6 overflow-hidden rounded-xl border border-slate-200 bg-white">
-          <table className="w-full text-sm">
-            <thead className="bg-slate-50 text-left text-xs uppercase tracking-wide text-muted">
-              <tr>
-                <th className="px-4 py-2.5">Имя</th>
-                <th className="px-4 py-2.5">Email</th>
-                <th className="px-4 py-2.5">Системная роль</th>
-                <th className="px-4 py-2.5">Статус</th>
-                <th className="px-4 py-2.5">Доступ к проектам</th>
-              </tr>
-            </thead>
-            <tbody>
-              {users.map((u) => {
-                const nProjects = projects.filter((p) => access[p.id]?.[u.id]).length;
-                const superuser = u.system_role === "OWNER" || u.system_role === "ADMIN";
-                return (
-                  <Fragment key={u.id}>
-                    <tr className="border-t border-slate-100">
-                      <td className="px-4 py-2.5 font-medium text-ink">{u.name}</td>
-                      <td className="px-4 py-2.5 text-muted">{u.email}</td>
-                      <td className="px-4 py-2.5">
-                        <select
-                          value={u.system_role ?? "MEMBER"}
-                          disabled={busy}
-                          onChange={(e) => onSystemRole(u, e.target.value)}
-                          className="rounded-lg border border-slate-300 px-2 py-1 text-sm"
-                        >
-                          {SYSTEM_ROLES.map((r) => (
-                            <option key={r} value={r}>
-                              {r}
-                            </option>
+      {/* users table */}
+      <div className="mt-6 overflow-hidden rounded-xl border border-slate-200 bg-white">
+        <table className="w-full text-sm">
+          <thead className="bg-slate-50 text-left text-xs uppercase tracking-wide text-muted">
+            <tr>
+              <th className="px-4 py-2.5">Имя</th>
+              <th className="px-4 py-2.5">Email</th>
+              <th className="px-4 py-2.5">Системная роль</th>
+              <th className="px-4 py-2.5">Статус</th>
+              <th className="px-4 py-2.5">Доступ к проектам</th>
+            </tr>
+          </thead>
+          <tbody>
+            {users.map((u) => {
+              const nProjects = projects.filter((p) => access[p.id]?.[u.id]).length;
+              const superuser = u.system_role === "OWNER" || u.system_role === "ADMIN";
+              return (
+                <Fragment key={u.id}>
+                  <tr className="border-t border-slate-100">
+                    <td className="px-4 py-2.5 font-medium text-ink">{u.name}</td>
+                    <td className="px-4 py-2.5 text-muted">{u.email}</td>
+                    <td className="px-4 py-2.5">
+                      <select
+                        value={u.system_role ?? "MEMBER"}
+                        disabled={busy}
+                        onChange={(e) => onSystemRole(u, e.target.value)}
+                        className="rounded-lg border border-slate-300 px-2 py-1 text-sm"
+                      >
+                        {SYSTEM_ROLES.map((r) => (
+                          <option key={r} value={r}>
+                            {r}
+                          </option>
+                        ))}
+                      </select>
+                    </td>
+                    <td className="px-4 py-2.5">
+                      <button
+                        onClick={() => onToggleSuspend(u)}
+                        disabled={busy}
+                        className={
+                          "rounded-full px-2.5 py-0.5 text-xs font-medium " +
+                          (u.is_suspended
+                            ? "bg-red-50 text-red-700 hover:bg-red-100"
+                            : "bg-green-50 text-green-700 hover:bg-green-100")
+                        }
+                      >
+                        {u.is_suspended ? "заблокирован" : "активен"}
+                      </button>
+                    </td>
+                    <td className="px-4 py-2.5">
+                      <button
+                        onClick={() => setExpanded(expanded === u.id ? null : u.id)}
+                        className="text-sm text-indigo-600 hover:underline"
+                      >
+                        {superuser
+                          ? "суперпользователь (все проекты)"
+                          : `${nProjects} проект(ов) ${expanded === u.id ? "▾" : "▸"}`}
+                      </button>
+                    </td>
+                  </tr>
+                  {expanded === u.id && !superuser && (
+                    <tr className="border-t border-slate-100 bg-slate-50/50">
+                      <td colSpan={5} className="px-4 py-3">
+                        <div className="grid grid-cols-1 gap-1.5 sm:grid-cols-2 lg:grid-cols-3">
+                          {projects.map((p) => (
+                            <div key={p.id} className="flex items-center gap-2">
+                              <span className="w-14 shrink-0 font-mono text-xs text-slate-500">{p.code}</span>
+                              <span className="flex-1 truncate text-xs text-slate-600" title={p.name}>
+                                {p.name}
+                              </span>
+                              <select
+                                value={access[p.id]?.[u.id] ?? ""}
+                                disabled={busy}
+                                onChange={(e) => onProjectRole(p.id, u.id, e.target.value)}
+                                className="rounded-md border border-slate-300 px-1.5 py-0.5 text-xs"
+                              >
+                                {PROJECT_ROLES.map((r) => (
+                                  <option key={r} value={r}>
+                                    {r === "" ? "— нет —" : r}
+                                  </option>
+                                ))}
+                              </select>
+                            </div>
                           ))}
-                        </select>
-                      </td>
-                      <td className="px-4 py-2.5">
-                        <button
-                          onClick={() => onToggleSuspend(u)}
-                          disabled={busy}
-                          className={
-                            "rounded-full px-2.5 py-0.5 text-xs font-medium " +
-                            (u.is_suspended
-                              ? "bg-red-50 text-red-700 hover:bg-red-100"
-                              : "bg-green-50 text-green-700 hover:bg-green-100")
-                          }
-                        >
-                          {u.is_suspended ? "заблокирован" : "активен"}
-                        </button>
-                      </td>
-                      <td className="px-4 py-2.5">
-                        <button
-                          onClick={() => setExpanded(expanded === u.id ? null : u.id)}
-                          className="text-sm text-indigo-600 hover:underline"
-                        >
-                          {superuser
-                            ? "суперпользователь (все проекты)"
-                            : `${nProjects} проект(ов) ${expanded === u.id ? "▾" : "▸"}`}
-                        </button>
+                        </div>
                       </td>
                     </tr>
-                    {expanded === u.id && !superuser && (
-                      <tr className="border-t border-slate-100 bg-slate-50/50">
-                        <td colSpan={5} className="px-4 py-3">
-                          <div className="grid grid-cols-1 gap-1.5 sm:grid-cols-2 lg:grid-cols-3">
-                            {projects.map((p) => (
-                              <div key={p.id} className="flex items-center gap-2">
-                                <span className="w-14 shrink-0 font-mono text-xs text-slate-500">{p.code}</span>
-                                <span className="flex-1 truncate text-xs text-slate-600" title={p.name}>
-                                  {p.name}
-                                </span>
-                                <select
-                                  value={access[p.id]?.[u.id] ?? ""}
-                                  disabled={busy}
-                                  onChange={(e) => onProjectRole(p.id, u.id, e.target.value)}
-                                  className="rounded-md border border-slate-300 px-1.5 py-0.5 text-xs"
-                                >
-                                  {PROJECT_ROLES.map((r) => (
-                                    <option key={r} value={r}>
-                                      {r === "" ? "— нет —" : r}
-                                    </option>
-                                  ))}
-                                </select>
-                              </div>
-                            ))}
-                          </div>
-                        </td>
-                      </tr>
-                    )}
-                  </Fragment>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-      </main>
-    </>
+                  )}
+                </Fragment>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </main>
   );
 }

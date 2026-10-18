@@ -11,6 +11,10 @@ simple operational layer that answers *"what's happening / where are the blocker
 closing tasks through a tiny CLI and the REST API. The result is one live log of
 work across every client, which you can roll up into monthly per-project reports.
 
+Projects that sell can switch on **leads**: a per-project sales funnel with its own
+stages and fields, fed by website forms and partner sites through an ingest key,
+plus **contracts and payments** to see what's invoiced and what's due.
+
 **License:** MIT · **Stack:** FastAPI · PostgreSQL · Redis · Next.js · TypeScript
 
 > Not another Jira. Minimal moving parts, clear ownership, a visible flow, short
@@ -34,6 +38,19 @@ work across every client, which you can roll up into monthly per-project reports
 - **Dashboards** — Portfolio (per-project health + open/overdue/blocked/review
   counters + active sprint), My Tasks, My Reviews, cross-project All Tasks with
   filters and pagination, per-project dashboard.
+- **Leads & funnels** (opt-in per project) — a lead is its own entity, not a
+  task: per-project stages with an OPEN / WON / LOST meaning, custom fields
+  (text, number, money, date, select, phone, email, url), an append-only journal
+  with comments, and a linked task for the work a lead needs. Board with drag &
+  drop, table with search, funnel stats (conversion by stage and source, open and
+  won amounts, days to close). Ready-made presets: sales and orders.
+- **Lead intake by key** — website forms and partner adapters post to
+  `POST /ingest/leads` with a per-project `X-Lead-Token` (stored as a hash, shown
+  once). Repeats with the same `source` + `external_id` never create duplicates;
+  data that doesn't fit the field schema is kept, not dropped.
+- **Money** — contracts and payments per project (expected / invoiced / paid),
+  a payment calendar and forecast; overdue is computed, never stored. Visible to
+  managers only.
 - **Notifications & search** — in-app notifications on assignment, review
   requests, change requests and comments; full-text-ish search across task keys,
   titles, descriptions and comment bodies.
@@ -148,7 +165,7 @@ pms/
 │   ├── app/
 │   │   ├── core/        # config, database, security (Argon2/JWT), redis, deps
 │   │   ├── models/      # SQLAlchemy — the full domain schema
-│   │   └── modules/     # auth, users, permissions, projects, tasks, ...
+│   │   └── modules/     # auth, users, permissions, projects, tasks, finance, leads, ...
 │   ├── alembic/         # migrations
 │   └── tests/
 ├── frontend/            # Next.js (App Router)
@@ -171,6 +188,22 @@ pms.py add --project ABC --title "Fix the contact form" --priority HIGH
 pms.py status ABC-12 "In Progress"
 pms.py comment ABC-12 "deployed, waiting for review"
 pms.py done ABC-12
+
+# leads, for projects that have them switched on
+pms.py lead enable --project ABC --preset sales
+pms.py lead add --project ABC --title "Acme: SEO audit" --source website --amount 1500
+pms.py lead stage ABC-L-1 "Переговоры"   # stage names come from the preset (Russian)
+pms.py lead stats --project ABC --from 2026-10-01
+```
+
+A website form or a marketplace adapter needs no user account, only the
+project's ingest key:
+
+```bash
+curl -X POST https://pms.example.com/api/ingest/leads \
+  -H "X-Lead-Token: $LEAD_TOKEN" -H "Content-Type: application/json" \
+  -d '{"source": "website", "external_id": "form-4812", "contact_name": "Jane",
+       "email": "jane@example.com", "data": {"budget": 3000}}'
 ```
 
 Point it at your instance and give it a service account via a small JSON config
@@ -179,9 +212,11 @@ Point it at your instance and give it a service account via a small JSON config
 ## Roadmap
 
 Core Scrumban (board, tasks, sprints, initiatives, dashboards, notifications,
-search, i18n) is implemented. On the list next: object-storage-backed
-attachments, email delivery for invitations/notifications, and automated
-database backups.
+search, i18n), money (contracts, payments) and leads with funnels are
+implemented, plus daily database backups. On the list next: project hierarchy
+(sub-projects under one parent), moving tasks between projects,
+object-storage-backed attachments and email delivery for invitations and
+notifications. See [CHANGELOG.md](CHANGELOG.md).
 
 ## Contributing
 

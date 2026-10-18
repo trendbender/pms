@@ -46,3 +46,6 @@ design/
 deploy/nginx-pms.conf
 # Internal operations ref: service-account email, credential paths, client project codes.
 /docs/OPERATIONS.md
+
+# Внутренние ТЗ: коды клиентских проектов, имена внутренних скриптов и источников лидов.
+/docs/specs/

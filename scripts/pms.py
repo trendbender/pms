@@ -28,6 +28,12 @@ Examples:
     pms.py member-add --user agent@example.com --role MEMBER          # all projects
     pms.py member-add --user agent@example.com --project ABC --role VIEWER
     pms.py rm ABC-26 --yes
+    pms.py lead enable --project KL --preset sales
+    pms.py lead add --project KL --title "Kwork #3267289" --source kwork --external 3267289
+    pms.py lead stage KL-L-1 "Переговоры"
+    pms.py lead stats --project KL --from 2026-10-01
+    pms.py lead token-add --project ORD --label "UBO adapter" --save ~/.config/ord-lead.token
+    pms.py lead ingest order.json --token-file ~/.config/ord-lead.token
 
 Add --json to most read commands for machine output.
 """
@@ -44,6 +50,7 @@ import re
 import sys
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 import uuid
 from pathlib import Path
@@ -456,6 +463,9 @@ def cmd_list(client, args):
         low = args.status.lower()
         tasks = [t for t in tasks if low in (t.get("status_name") or "").lower()
                  or low == (t.get("status_category") or "").lower()]
+    if getattr(args, "assignee", None):
+        who_u = resolve_user(client, args.assignee)
+        tasks = [t for t in tasks if t.get("assignee_id") == who_u["id"]]
     users = {u["id"]: u["name"] for u in client.call("GET", "/users")}
 
     def render(ts):
@@ -468,6 +478,38 @@ def cmd_list(client, args):
             print(f"{t['key']:<8} [{t.get('status_name','?'):<12}] {t['priority']:<8} @{who}{blk}{due}  {t['title']}")
             print(f"         {client.task_url(t['key'])}")
     out(tasks, args.json, render)
+
+
+def cmd_inbox(client, args):
+    """Очередь исполнителя по всем проектам (конвейер ИИ: conventions/ai-pipeline.md)."""
+    user = resolve_user(client, args.assignee)
+    projects = client.call("GET", "/projects")
+    low = (args.status or "").lower()
+    rows = []
+    for p in sorted(projects, key=lambda p: p["code"]):
+        for t in client.call("GET", f"/projects/{p['id']}/tasks"):
+            if t.get("assignee_id") != user["id"]:
+                continue
+            cat = (t.get("status_category") or "").lower()
+            name = (t.get("status_name") or "").lower()
+            if low and not (low in name or low == cat):
+                continue
+            if not low and cat == "done":
+                continue
+            t["project_code"] = p["code"]
+            t["url"] = client.task_url(t["key"])
+            rows.append(t)
+    prio = {"CRITICAL": 0, "HIGH": 1, "MEDIUM": 2, "LOW": 3, "NONE": 4}
+    rows.sort(key=lambda t: (prio.get(t.get("priority"), 9), t.get("due_at") or "9999", t["key"]))
+
+    def render(ts):
+        print(f"# inbox {user['name']} <{user.get('email', '')}> — {len(ts)} задач")
+        for t in ts:
+            due = fmt_due(t.get("due_at"))
+            due = f" ⏰{due}" if due else ""
+            print(f"{t['key']:<8} [{t.get('status_name', '?'):<12}] {t['priority']:<8}{due}  {t['title']}")
+            print(f"         {t['url']}")
+    out(rows, args.json, render)
 
 
 def cmd_show(client, args):
@@ -873,6 +915,258 @@ def cmd_money_contracts(client, args):
         print(f"{c['id'][:8]}  {c['kind']:<9} {amount:>16}  {c['title']}")
 
 
+# --------------------------------------------------------------------------- #
+# Лиды (модуль включается на проекте: pms.py lead enable)
+# --------------------------------------------------------------------------- #
+
+
+def lead_url(client: Client, key: str) -> str:
+    return f"{client.web_base}/l/{key.lower()}"
+
+
+def resolve_lead(client: Client, key: str) -> dict:
+    return client.call("GET", f"/leads/by-key/{key.strip()}")
+
+
+def _parse_fields(pairs: list[str] | None) -> dict:
+    data = {}
+    for pair in pairs or []:
+        if "=" not in pair:
+            die(f"--field expects key=value, got: {pair}")
+        k, v = pair.split("=", 1)
+        data[k.strip()] = v
+    return data
+
+
+def _lead_line(ld: dict) -> str:
+    amount = f" · {Decimal(ld['amount']):,.0f} {ld['currency']}".replace(",", " ") if ld.get("amount") else ""
+    who = f" · {ld['contact_name']}" if ld.get("contact_name") and ld["contact_name"] != ld["title"] else ""
+    return f"{ld['key']:<10} [{ld['stage_name']:<18}] {ld['source']:<8}{amount}{who}  {ld['title']}"
+
+
+def cmd_lead_list(client, args):
+    project = resolve_project(client, args.project)
+    q = []
+    if args.stage:
+        settings = client.call("GET", f"/projects/{project['id']}/leads/settings")
+        st = next((s for s in settings["stages"] if s["name"].lower() == args.stage.lower()), None)
+        if st is None:
+            die(f"unknown stage: {args.stage}")
+        q.append(f"stage_id={st['id']}")
+    if args.category:
+        q.append(f"category={args.category}")
+    if args.source:
+        q.append(f"source={urllib.parse.quote(args.source)}")
+    if args.q:
+        q.append(f"q={urllib.parse.quote(args.q)}")
+    path = f"/projects/{project['id']}/leads" + (f"?{'&'.join(q)}" if q else "")
+    leads = client.call("GET", path)
+
+    def render(ls):
+        print(f"# {project['code']} лиды — {len(ls)}")
+        for ld in ls:
+            print(_lead_line(ld))
+            print(f"           {lead_url(client, ld['key'])}")
+
+    out(leads, args.json, render)
+
+
+def cmd_lead_add(client, args):
+    project = resolve_project(client, args.project)
+    body = {"title": args.title, "source": args.source}
+    for attr, field in (("external", "external_id"), ("contact", "contact_name"),
+                        ("phone", "phone"), ("email", "email"), ("amount", "amount"),
+                        ("url", "source_url")):
+        if getattr(args, attr):
+            body[field] = getattr(args, attr)
+    if args.field:
+        body["data"] = _parse_fields(args.field)
+    if args.stage:
+        settings = client.call("GET", f"/projects/{project['id']}/leads/settings")
+        st = next((s for s in settings["stages"] if s["name"].lower() == args.stage.lower()), None)
+        if st is None:
+            die(f"unknown stage: {args.stage}")
+        body["stage_id"] = st["id"]
+    if args.owner:
+        body["owner_id"] = resolve_user(client, args.owner)["id"]
+    ld = client.call("POST", f"/projects/{project['id']}/leads", body)
+    out(ld, args.json, lambda ld: print(f"создан {ld['key']}: {ld['title']}\n{lead_url(client, ld['key'])}"))
+
+
+def cmd_lead_show(client, args):
+    ld = resolve_lead(client, args.key)
+    events = client.call("GET", f"/leads/{ld['id']}/events")
+    ld["events"] = events
+
+    def human(ld):
+        print(f"{ld['key']} — {ld['title']}")
+        print(lead_url(client, ld["key"]))
+        print(f"этап: {ld['stage_name']} ({ld['stage_category']}) · источник: {ld['source']}"
+              + (f" #{ld['external_id']}" if ld.get("external_id") else ""))
+        for label, k in (("контакт", "contact_name"), ("телефон", "phone"), ("email", "email"),
+                         ("сумма", "amount"), ("ссылка", "source_url"), ("причина", "lost_reason"),
+                         ("задача", "task_key")):
+            if ld.get(k):
+                print(f"{label}: {ld[k]}")
+        if ld.get("data"):
+            print("поля:")
+            for k, v in ld["data"].items():
+                print(f"  {k}: {v}")
+        print(f"\nЖурнал ({len(events)}):")
+        for e in events:
+            d = e.get("data") or {}
+            if e["action"] == "comment":
+                info = d.get("text", "")
+            elif e["action"] == "stage.changed":
+                info = f"{d.get('from')} → {d.get('to')}"
+            else:
+                info = ", ".join(f"{k}={v}" for k, v in d.items())
+            print(f"  · {e['created_at'][:16].replace('T', ' ')} {e['action']}: {info}")
+
+    out(ld, args.json, human)
+
+
+def cmd_lead_stage(client, args):
+    ld = resolve_lead(client, args.key)
+    body = {"stage": args.stage}
+    if args.reason:
+        body["lost_reason"] = args.reason
+    ld = client.call("PATCH", f"/leads/{ld['id']}/stage", body)
+    out(ld, args.json, lambda ld: print(f"{ld['key']} → {ld['stage_name']}\n{lead_url(client, ld['key'])}"))
+
+
+def cmd_lead_edit(client, args):
+    ld = resolve_lead(client, args.key)
+    body = {}
+    for attr, field in (("title", "title"), ("contact", "contact_name"), ("phone", "phone"),
+                        ("email", "email"), ("amount", "amount"), ("url", "source_url")):
+        if getattr(args, attr) is not None:
+            body[field] = getattr(args, attr)
+    if args.field:
+        body["data"] = _parse_fields(args.field)
+    if args.owner:
+        body["owner_id"] = resolve_user(client, args.owner)["id"]
+    if not body:
+        die("nothing to change")
+    ld = client.call("PATCH", f"/leads/{ld['id']}", body)
+    out(ld, args.json, lambda ld: print(f"{ld['key']} обновлён\n{lead_url(client, ld['key'])}"))
+
+
+def cmd_lead_comment(client, args):
+    ld = resolve_lead(client, args.key)
+    c = client.call("POST", f"/leads/{ld['id']}/comments", {"text": args.text})
+    out(c, args.json, lambda _: print(f"комментарий добавлен к {ld['key']}\n{lead_url(client, ld['key'])}"))
+
+
+def cmd_lead_task(client, args):
+    ld = resolve_lead(client, args.key)
+    body = {"priority": args.priority}
+    if args.title:
+        body["title"] = args.title
+    if args.to:
+        body["assignee_id"] = resolve_user(client, args.to)["id"]
+    ld = client.call("POST", f"/leads/{ld['id']}/task", body)
+    out(ld, args.json, lambda ld: print(
+        f"{ld['key']} → задача {ld['task_key']}\n{client.task_url(ld['task_key'])}"))
+
+
+def cmd_lead_stats(client, args):
+    project = resolve_project(client, args.project)
+    q = []
+    def period(value: str, end: bool) -> str:
+        # голая дата: «с» = начало дня, «по» = конец дня (по Москве)
+        if re.fullmatch(r"\d{4}-\d{2}-\d{2}", value.strip()):
+            return f"{value.strip()}T{'23:59:59' if end else '00:00:00'}+03:00"
+        return parse_due(value)
+
+    if args.date_from:
+        q.append(f"from={urllib.parse.quote(period(args.date_from, False))}")
+    if args.date_to:
+        q.append(f"to={urllib.parse.quote(period(args.date_to, True))}")
+    s = client.call("GET", f"/projects/{project['id']}/leads/stats" + (f"?{'&'.join(q)}" if q else ""))
+
+    def human(s):
+        rate = f"{s['win_rate'] * 100:.0f}%" if s.get("win_rate") is not None else "—"
+        print(f"# {project['code']} лиды {s['period_from'][:10]} … {s['period_to'][:10]}")
+        print(f"всего {s['total']} · в работе {s['open']} · выиграно {s['won']} · проиграно {s['lost']}"
+              f" · win rate {rate}")
+        print(f"в работе на {s['open_amount']} · выиграно на {s['won_amount']}"
+              + (f" · до закрытия в среднем {s['avg_days_to_close']} дн." if s.get("avg_days_to_close") else ""))
+        print("\nЭтапы (сейчас / побывали):")
+        for st in s["stages"]:
+            print(f"  {st['name']:<22} {st['count']:>4} / {st['reached']:<4} {st['category']}")
+        print("\nИсточники (всего / выиграно):")
+        for src in s["sources"]:
+            print(f"  {src['source']:<12} {src['count']:>4} / {src['won']}")
+
+    out(s, args.json, human)
+
+
+def cmd_lead_enable(client, args):
+    project = resolve_project(client, args.project)
+    s = client.call("POST", f"/projects/{project['id']}/leads/enable", {"preset": args.preset})
+    out(s, args.json, lambda s: print(
+        f"лиды включены в {project['code']}: этапов {len(s['stages'])}, полей {len(s['fields'])}\n"
+        + " → ".join(st["name"] for st in s["stages"])))
+
+
+def cmd_lead_tokens(client, args):
+    project = resolve_project(client, args.project)
+    s = client.call("GET", f"/projects/{project['id']}/leads/settings")
+    toks = s.get("tokens") or []
+    out(toks, args.json, lambda ts: [
+        print(f"{t['id'][:8]}  {t['prefix']}…  {t['label']:<24} "
+              f"{'отозван' if t.get('revoked_at') else 'активен'}"
+              f"{'  · последний раз ' + t['last_used_at'][:16] if t.get('last_used_at') else ''}")
+        for t in ts] or print("ключей нет"))
+
+
+def cmd_lead_token_add(client, args):
+    project = resolve_project(client, args.project)
+    t = client.call("POST", f"/projects/{project['id']}/lead-tokens", {"label": args.label})
+    if args.save:
+        path = Path(args.save).expanduser()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(t["token"] + "\n")
+        os.chmod(path, 0o600)
+        print(f"ключ «{t['label']}» ({t['prefix']}…) сохранён в {path} (chmod 600); значение больше не показывается")
+        return
+    out(t, args.json, lambda t: print(
+        f"ключ «{t['label']}»: {t['token']}\nсохраните его сейчас: повторно значение не показывается"))
+
+
+def cmd_lead_ingest(_client, args):
+    """Приём по ключу проекта, без логина пользователя (для скриптов и адаптеров)."""
+    token = os.environ.get("PMS_LEAD_TOKEN")
+    if args.token_file:
+        token = Path(args.token_file).expanduser().read_text().strip()
+    if not token:
+        die("need --token-file FILE or PMS_LEAD_TOKEN")
+    api = args.api
+    if not api:
+        try:
+            api = json.loads(Path(CONFIG_PATH).read_text()).get("api_base")
+        except (OSError, ValueError):
+            api = None
+    if not api:
+        die("need --api https://pms.example.com/api (or api_base in the config)")
+    body = json.loads(Path(args.json_file).read_text()) if args.json_file != "-" else json.load(sys.stdin)
+    req = urllib.request.Request(
+        f"{api.rstrip('/')}/ingest/leads",
+        data=json.dumps(body).encode(),
+        headers={"Content-Type": "application/json", "Accept": "application/json",
+                 "X-Lead-Token": token},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            r = json.loads(resp.read())
+    except urllib.error.HTTPError as e:
+        die(f"HTTP {e.code}: {e.read().decode(errors='replace')}")
+    out(r, args.json, lambda r: print(
+        f"{'создан' if r['created'] else 'уже был'} {r['key']} [{r['stage_name']}]\n{r['url']}"))
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="pms.py", description="PMS task control CLI")
     p.add_argument("--json", action="store_true", help="machine-readable JSON output")
@@ -894,7 +1188,13 @@ def build_parser() -> argparse.ArgumentParser:
     sp = sub.add_parser("list", help="list tasks in a project")
     sp.add_argument("--project", required=True)
     sp.add_argument("--status", help="filter by status name or category")
+    sp.add_argument("--assignee", help="filter by assignee email or name")
     sp.set_defaults(fn=cmd_list)
+
+    sp = sub.add_parser("inbox", help="tasks assigned to a user across all projects (AI provider queue)")
+    sp.add_argument("--assignee", required=True, help="email or name, e.g. antigravity")
+    sp.add_argument("--status", help="filter by status name or category, e.g. Ready")
+    sp.set_defaults(fn=cmd_inbox)
 
     sp = sub.add_parser("show", help="task detail + comments")
     sp.add_argument("key")
@@ -1032,12 +1332,101 @@ def build_parser() -> argparse.ArgumentParser:
     m.add_argument("--note")
     m.set_defaults(fn=cmd_money_contract_add)
 
+    # ---- lead: лиды проекта ----------------------------------------------
+    sp = sub.add_parser("lead", help="лиды проекта (модуль включается: lead enable)")
+    lsub = sp.add_subparsers(dest="lead_cmd", required=True)
+
+    m = lsub.add_parser("list", help="лиды проекта")
+    m.add_argument("--project", required=True)
+    m.add_argument("--stage", help="имя этапа")
+    m.add_argument("--category", choices=["OPEN", "WON", "LOST"])
+    m.add_argument("--source")
+    m.add_argument("--q", help="поиск по названию, контакту, телефону, email, внешнему id")
+    m.set_defaults(fn=cmd_lead_list)
+
+    m = lsub.add_parser("add", help="завести лид вручную")
+    m.add_argument("--project", required=True)
+    m.add_argument("--title", required=True)
+    m.add_argument("--source", default="manual", help="kwork, fl, site, telegram, …")
+    m.add_argument("--external", help="внешний id (номер проекта Kwork, id заказа)")
+    m.add_argument("--contact")
+    m.add_argument("--phone")
+    m.add_argument("--email")
+    m.add_argument("--amount")
+    m.add_argument("--url", help="ссылка на источник")
+    m.add_argument("--stage", help="имя этапа (по умолчанию первый)")
+    m.add_argument("--owner", help="ответственный: email или имя")
+    m.add_argument("--field", action="append", metavar="KEY=VALUE", help="своё поле, можно повторять")
+    m.set_defaults(fn=cmd_lead_add)
+
+    m = lsub.add_parser("show", help="карточка лида и журнал")
+    m.add_argument("key", help="например KL-L-3")
+    m.set_defaults(fn=cmd_lead_show)
+
+    m = lsub.add_parser("stage", help="перевести на этап")
+    m.add_argument("key")
+    m.add_argument("stage", help="имя этапа")
+    m.add_argument("--reason", help="причина проигрыша (обязательна для LOST)")
+    m.set_defaults(fn=cmd_lead_stage)
+
+    m = lsub.add_parser("edit", help="поменять поля лида")
+    m.add_argument("key")
+    m.add_argument("--title")
+    m.add_argument("--contact")
+    m.add_argument("--phone")
+    m.add_argument("--email")
+    m.add_argument("--amount")
+    m.add_argument("--url")
+    m.add_argument("--owner")
+    m.add_argument("--field", action="append", metavar="KEY=VALUE", help="пустое значение стирает поле")
+    m.set_defaults(fn=cmd_lead_edit)
+
+    m = lsub.add_parser("comment", help="комментарий к лиду")
+    m.add_argument("key")
+    m.add_argument("text")
+    m.set_defaults(fn=cmd_lead_comment)
+
+    m = lsub.add_parser("task", help="создать задачу по лиду (ссылка в обе стороны)")
+    m.add_argument("key")
+    m.add_argument("--title")
+    m.add_argument("--to", help="исполнитель: email или имя")
+    m.add_argument("--priority", default="MEDIUM",
+                   choices=["CRITICAL", "HIGH", "MEDIUM", "LOW", "NONE"])
+    m.set_defaults(fn=cmd_lead_task)
+
+    m = lsub.add_parser("stats", help="воронка: этапы, конверсия, источники")
+    m.add_argument("--project", required=True)
+    m.add_argument("--from", dest="date_from", help=DUE_HELP)
+    m.add_argument("--to", dest="date_to")
+    m.set_defaults(fn=cmd_lead_stats)
+
+    m = lsub.add_parser("enable", help="включить лиды на проекте")
+    m.add_argument("--project", required=True)
+    m.add_argument("--preset", default="basic", choices=["sales", "orders", "basic"])
+    m.set_defaults(fn=cmd_lead_enable)
+
+    m = lsub.add_parser("tokens", help="ключи приёма проекта")
+    m.add_argument("--project", required=True)
+    m.set_defaults(fn=cmd_lead_tokens)
+
+    m = lsub.add_parser("token-add", help="выпустить ключ приёма (значение показывается один раз)")
+    m.add_argument("--project", required=True)
+    m.add_argument("--label", required=True)
+    m.add_argument("--save", metavar="FILE", help="записать ключ в файл (chmod 600) и не печатать")
+    m.set_defaults(fn=cmd_lead_token_add)
+
+    m = lsub.add_parser("ingest", help="приём лида по ключу проекта (JSON-файл или - для stdin)")
+    m.add_argument("json_file")
+    m.add_argument("--token-file", help="файл с ключом; иначе env PMS_LEAD_TOKEN")
+    m.add_argument("--api", help="адрес API, если нет конфига")
+    m.set_defaults(fn=cmd_lead_ingest, no_auth=True)
+
     return p
 
 
 def main() -> None:
     args = build_parser().parse_args()
-    client = Client(_load_config())
+    client = None if getattr(args, "no_auth", False) else Client(_load_config())
     try:
         args.fn(client, args)
     except ApiError as e:

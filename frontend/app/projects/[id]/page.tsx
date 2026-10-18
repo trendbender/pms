@@ -128,6 +128,11 @@ export default function ProjectBoardPage() {
         {project?.goal && <p className="mt-1 text-sm text-muted">🎯 {project.goal}</p>}
         <nav className="mt-3 flex gap-4 border-b border-slate-200 text-sm">
           <span className="border-b-2 border-ink pb-2 font-medium">{t("board.board")}</span>
+          {project?.leads_enabled && (
+            <Link href={`/projects/${ref}/leads`} className="pb-2 text-muted hover:text-ink">
+              {t("leads.tab")}
+            </Link>
+          )}
           <Link
             href={`/projects/${ref}/sprints`}
             className="pb-2 text-muted hover:text-ink"

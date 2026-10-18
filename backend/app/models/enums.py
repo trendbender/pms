@@ -75,6 +75,26 @@ class PaymentStatus(StrEnum):
     CANCELLED = "CANCELLED"  # отменён или списан
 
 
+class LeadStageCategory(StrEnum):
+    """Смысл этапа воронки: логика и статистика опираются на категорию, а не на имя."""
+
+    OPEN = "OPEN"  # лид в работе
+    WON = "WON"    # выигран, выполнен, оплачен
+    LOST = "LOST"  # проигран, отменён (нужна причина)
+
+
+class LeadFieldType(StrEnum):
+    TEXT = "text"
+    NUMBER = "number"
+    MONEY = "money"
+    DATE = "date"
+    DATETIME = "datetime"
+    SELECT = "select"
+    PHONE = "phone"
+    EMAIL = "email"
+    URL = "url"
+
+
 class SprintStatus(StrEnum):
     PLANNED = "PLANNED"
     ACTIVE = "ACTIVE"

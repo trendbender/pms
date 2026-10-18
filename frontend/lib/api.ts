@@ -101,7 +101,16 @@ export async function api<T = unknown>(
 
   if (!res.ok) {
     const detail = data?.detail ?? res.statusText;
-    throw new ApiError(res.status, typeof detail === "string" ? detail : "Request failed");
+    // detail бывает объектом: {message, fields} у ошибок своих полей лида
+    const message =
+      typeof detail === "string"
+        ? detail
+        : detail?.fields
+          ? `${detail.message ?? "Invalid data"}: ${Object.entries(detail.fields)
+              .map(([k, v]) => `${k} (${v})`)
+              .join(", ")}`
+          : detail?.message ?? "Request failed";
+    throw new ApiError(res.status, message);
   }
   return data as T;
 }
@@ -224,6 +233,7 @@ export interface Project {
   owner_id: string | null;
   wip_limit: number | null;
   archived_at: string | null;
+  leads_enabled?: boolean;
 }
 
 // Archived projects are hidden unless explicitly asked for (same rule on the
@@ -638,3 +648,185 @@ export const markAllNotificationsRead = () =>
 
 export const searchTasks = (q: string) =>
   api<TaskCard[]>(`/search?q=${encodeURIComponent(q)}`);
+
+// ---- Лиды (модуль включается на проекте) ----
+
+export type LeadCategory = "OPEN" | "WON" | "LOST";
+
+export interface LeadStage {
+  id: string;
+  project_id: string;
+  name: string;
+  category: LeadCategory;
+  position: number;
+  color: string | null;
+}
+
+export type LeadFieldType =
+  | "text" | "number" | "money" | "date" | "datetime" | "select" | "phone" | "email" | "url";
+
+export interface LeadField {
+  id: string;
+  project_id: string;
+  key: string;
+  label: string;
+  type: LeadFieldType;
+  options: string[] | null;
+  required: boolean;
+  is_pii: boolean;
+  position: number;
+}
+
+export interface LeadToken {
+  id: string;
+  label: string;
+  prefix: string;
+  created_at: string;
+  last_used_at: string | null;
+  revoked_at: string | null;
+  token?: string; // только в ответе на создание
+}
+
+export interface LeadSettings {
+  enabled: boolean;
+  stages: LeadStage[];
+  fields: LeadField[];
+  tokens: LeadToken[] | null;
+}
+
+export interface Lead {
+  id: string;
+  project_id: string;
+  key: string;
+  number: number;
+  title: string;
+  stage_id: string;
+  stage_name: string;
+  stage_category: LeadCategory;
+  owner_id: string | null;
+  source: string;
+  source_url: string | null;
+  external_id: string | null;
+  contact_name: string | null;
+  phone: string | null;
+  email: string | null;
+  amount: string | null;
+  currency: string;
+  data: Record<string, unknown>;
+  received_at: string;
+  closed_at: string | null;
+  lost_reason: string | null;
+  task_id: string | null;
+  task_key: string | null;
+  duplicate_of_id: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface LeadEvent {
+  id: string;
+  action: string;
+  actor_id: string | null;
+  token_id: string | null;
+  data: Record<string, unknown> | null;
+  created_at: string;
+}
+
+export interface LeadBoardColumn {
+  stage: LeadStage;
+  leads: Lead[];
+  count: number;
+  amount: string;
+}
+
+export interface LeadStats {
+  period_from: string;
+  period_to: string;
+  total: number;
+  open: number;
+  won: number;
+  lost: number;
+  win_rate: number | null;
+  open_amount: string;
+  won_amount: string;
+  avg_days_to_close: number | null;
+  stages: { stage_id: string; name: string; category: LeadCategory; count: number; reached: number; amount: string }[];
+  sources: { source: string; count: number; won: number; won_amount: string }[];
+}
+
+export interface LeadPatch {
+  title?: string;
+  contact_name?: string | null;
+  phone?: string | null;
+  email?: string | null;
+  amount?: string | null;
+  source_url?: string | null;
+  owner_id?: string | null;
+  data?: Record<string, unknown>;
+}
+
+const json = (body: unknown) => ({ method: "POST", body: JSON.stringify(body) });
+
+export const getLeadSettings = (projectId: string) =>
+  api<LeadSettings>(`/projects/${projectId}/leads/settings`);
+export const enableLeads = (projectId: string, preset: "sales" | "orders" | "basic") =>
+  api<LeadSettings>(`/projects/${projectId}/leads/enable`, json({ preset }));
+export const disableLeads = (projectId: string) =>
+  api<LeadSettings>(`/projects/${projectId}/leads/disable`, json({}));
+
+export const createLeadStage = (
+  projectId: string,
+  input: { name: string; category: LeadCategory }
+) => api<LeadStage>(`/projects/${projectId}/lead-stages`, json(input));
+export const updateLeadStage = (id: string, patch: Partial<Pick<LeadStage, "name" | "category" | "position" | "color">>) =>
+  api<LeadStage>(`/lead-stages/${id}`, { method: "PATCH", body: JSON.stringify(patch) });
+export const deleteLeadStage = (id: string) =>
+  api<void>(`/lead-stages/${id}`, { method: "DELETE" });
+
+export const createLeadField = (
+  projectId: string,
+  input: { key: string; label: string; type: LeadFieldType; options?: string[]; required?: boolean; is_pii?: boolean }
+) => api<LeadField>(`/projects/${projectId}/lead-fields`, json(input));
+export const deleteLeadField = (id: string) =>
+  api<void>(`/lead-fields/${id}`, { method: "DELETE" });
+
+export const createLeadToken = (projectId: string, label: string) =>
+  api<LeadToken>(`/projects/${projectId}/lead-tokens`, json({ label }));
+export const revokeLeadToken = (id: string) =>
+  api<LeadToken>(`/lead-tokens/${id}/revoke`, json({}));
+
+export const listLeads = (
+  projectId: string,
+  params: { stage_id?: string; category?: string; source?: string; q?: string } = {}
+) => {
+  const qs = new URLSearchParams();
+  for (const [k, v] of Object.entries(params)) if (v) qs.set(k, v);
+  const s = qs.toString();
+  return api<Lead[]>(`/projects/${projectId}/leads${s ? `?${s}` : ""}`);
+};
+export const getLeadBoard = (projectId: string) =>
+  api<{ columns: LeadBoardColumn[] }>(`/projects/${projectId}/leads/board`);
+export const getLeadStats = (projectId: string) =>
+  api<LeadStats>(`/projects/${projectId}/leads/stats`);
+export const createLead = (
+  projectId: string,
+  input: { title: string; source?: string; stage_id?: string } & LeadPatch
+) => api<Lead>(`/projects/${projectId}/leads`, json(input));
+export const getLead = (id: string) => api<Lead>(`/leads/${id}`);
+export const getLeadByKey = (key: string) =>
+  api<Lead>(`/leads/by-key/${encodeURIComponent(key)}`);
+export const updateLead = (id: string, patch: LeadPatch) =>
+  api<Lead>(`/leads/${id}`, { method: "PATCH", body: JSON.stringify(patch) });
+export const changeLeadStage = (id: string, stage_id: string, lost_reason?: string) =>
+  api<Lead>(`/leads/${id}/stage`, {
+    method: "PATCH",
+    body: JSON.stringify({ stage_id, ...(lost_reason ? { lost_reason } : {}) }),
+  });
+export const deleteLead = (id: string) => api<void>(`/leads/${id}`, { method: "DELETE" });
+export const getLeadEvents = (id: string) => api<LeadEvent[]>(`/leads/${id}/events`);
+export const addLeadComment = (id: string, text: string) =>
+  api<LeadEvent>(`/leads/${id}/comments`, json({ text }));
+export const createLeadTask = (id: string) => api<Lead>(`/leads/${id}/task`, json({}));
+
+// Короткая ссылка на лид: /l/kl-l-3 (как /t/ для задач)
+export const leadHref = (key: string) => `/l/${key.toLowerCase()}`;

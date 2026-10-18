@@ -240,6 +240,11 @@ export default function ProjectSettingsPage() {
           <Link href={`/projects/${ref}`} className="pb-2 text-muted hover:text-ink">
             {t("board.board")}
           </Link>
+          {project?.leads_enabled && (
+            <Link href={`/projects/${ref}/leads`} className="pb-2 text-muted hover:text-ink">
+              {t("leads.tab")}
+            </Link>
+          )}
           <Link href={`/projects/${ref}/sprints`} className="pb-2 text-muted hover:text-ink">
             {t("board.sprints")}
           </Link>
@@ -247,6 +252,11 @@ export default function ProjectSettingsPage() {
             {t("board.settings")}
           </span>
         </nav>
+        <p className="mt-3 text-sm">
+          <Link href={`/projects/${ref}/leads/settings`} className="text-muted hover:text-ink">
+            {project?.leads_enabled ? t("leads.funnelSettings") : t("leads.enable")} →
+          </Link>
+        </p>
       </header>
 
       {error && <p className="mt-4 text-sm text-red-600">{error}</p>}

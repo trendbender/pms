@@ -6,6 +6,7 @@ from app.models.base import Base
 from app.models.comment import Comment
 from app.models.finance import Contract, Payment
 from app.models.initiative import Initiative
+from app.models.lead import Lead, LeadEvent, LeadField, LeadIngestToken, LeadStage
 from app.models.notification import Notification
 from app.models.project import Project, ProjectMember
 from app.models.sprint import Sprint
@@ -28,6 +29,11 @@ __all__ = [
     "Comment",
     "Contract",
     "Payment",
+    "Lead",
+    "LeadStage",
+    "LeadField",
+    "LeadEvent",
+    "LeadIngestToken",
     "Attachment",
     "Notification",
     "ActivityLog",

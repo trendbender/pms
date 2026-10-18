@@ -1,7 +1,7 @@
 from datetime import datetime
 from uuid import UUID
 
-from sqlalchemy import DateTime, ForeignKey, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, DateTime, ForeignKey, String, Text, UniqueConstraint, false
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import Base, TimestampMixin, uuid_pk
@@ -40,6 +40,13 @@ class Project(Base, TimestampMixin):
 
     # per-project monotonic counter for task numbers (SEO-1, SEO-2, ...)
     task_counter: Mapped[int] = mapped_column(nullable=False, default=0)
+
+    # Модуль «Лиды» включается на проекте флагом; номера лидов (KL-L-1, ...)
+    # идут своим счётчиком, чтобы не съедать номера задач.
+    leads_enabled: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=false()
+    )
+    lead_counter: Mapped[int] = mapped_column(nullable=False, default=0, server_default="0")
 
     start_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     due_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

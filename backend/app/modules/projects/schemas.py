@@ -60,6 +60,7 @@ class ProjectOut(BaseModel):
     due_date: datetime | None
     archived_at: datetime | None
     created_at: datetime
+    leads_enabled: bool = False
 
     model_config = {"from_attributes": True}
 

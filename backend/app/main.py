@@ -13,6 +13,7 @@ from app.modules.comments.router import router as comments_router
 from app.modules.dashboard.router import router as dashboard_router
 from app.modules.finance.router import router as finance_router
 from app.modules.initiatives.router import router as initiatives_router
+from app.modules.leads.router import router as leads_router
 from app.modules.notifications.router import router as notifications_router
 from app.modules.projects.router import router as projects_router
 from app.modules.search.router import router as search_router
@@ -52,6 +53,7 @@ app.include_router(initiatives_router)
 app.include_router(sprints_router)
 app.include_router(dashboard_router)
 app.include_router(finance_router)
+app.include_router(leads_router)
 app.include_router(notifications_router)
 app.include_router(search_router)
 

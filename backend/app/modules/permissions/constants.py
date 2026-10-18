@@ -48,6 +48,14 @@ class Perm(StrEnum):
     FINANCE_VIEW = "finance.view"
     FINANCE_MANAGE = "finance.manage"
 
+    # Лиды: видят и ведут участники проекта (контакты без маски, решение
+    # 18.10.2026); удаляет менеджер; воронку, поля и ключи приёма настраивает
+    # владелец проекта или админ workspace.
+    LEAD_VIEW = "lead.view"
+    LEAD_MANAGE = "lead.manage"
+    LEAD_DELETE = "lead.delete"
+    LEAD_SETTINGS = "lead.settings"
+
 
 ALL_PERMS: frozenset[Perm] = frozenset(Perm)
 
@@ -73,6 +81,8 @@ _MEMBER_PERMS: frozenset[Perm] = _READ_PERMS | frozenset(
         Perm.COMMENT_CREATE,
         Perm.COMMENT_EDIT,
         Perm.ATTACHMENT_UPLOAD,
+        Perm.LEAD_VIEW,
+        Perm.LEAD_MANAGE,
     }
 )
 
@@ -89,12 +99,13 @@ _MANAGER_PERMS: frozenset[Perm] = _MEMBER_PERMS | frozenset(
         Perm.BOARD_MANAGE,
         Perm.FINANCE_VIEW,
         Perm.FINANCE_MANAGE,
+        Perm.LEAD_DELETE,
     }
 )
 
 # Owner (of a project): manager + delete the project.
 _PROJECT_OWNER_PERMS: frozenset[Perm] = _MANAGER_PERMS | frozenset(
-    {Perm.PROJECT_DELETE, Perm.PROJECT_CREATE}
+    {Perm.PROJECT_DELETE, Perm.PROJECT_CREATE, Perm.LEAD_SETTINGS}
 )
 
 # ---- Project-level role -> permissions ----

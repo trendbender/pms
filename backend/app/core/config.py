@@ -26,6 +26,9 @@ class Settings(BaseSettings):
     # CORS
     cors_origins: str = "http://localhost:3000"
 
+    # Публичный адрес веб-интерфейса: из него строятся ссылки на лиды в ответах API
+    public_url: str = "https://pms.klientlab.ru"
+
     # Bootstrap owner + workspace (used by the seed command)
     bootstrap_owner_email: str = "owner@example.com"
     bootstrap_owner_password: str = "owner_dev_password_change_me"

@@ -11,7 +11,7 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.database import get_db
+from app.core.database import DbSession
 from app.core.deps import get_current_user, get_workspace_id
 from app.models.comment import Comment
 from app.models.task import Task
@@ -28,7 +28,7 @@ async def search(
     limit: int = Query(default=30, ge=1, le=100),
     user: User = Depends(get_current_user),
     workspace_id: UUID = Depends(get_workspace_id),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = DbSession,
 ) -> list[TaskCard]:
     term = q.strip()
     if not term:

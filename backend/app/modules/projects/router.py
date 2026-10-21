@@ -5,7 +5,7 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.database import get_db
+from app.core.database import DbSession
 from app.core.deps import (
     get_current_user,
     get_workspace_id,
@@ -48,7 +48,7 @@ async def list_projects(
     include_archived: bool = False,
     user: User = Depends(get_current_user),
     workspace_id: UUID = Depends(get_workspace_id),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = DbSession,
 ) -> list[Project]:
     return await service.list_visible_projects(
         db, user.id, workspace_id, include_archived=include_archived
@@ -61,7 +61,7 @@ async def create_project(
     user: User = Depends(get_current_user),
     workspace_id: UUID = Depends(get_workspace_id),
     _: None = Depends(require_workspace_permission(Perm.PROJECT_CREATE)),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = DbSession,
 ) -> Project:
     existing = await db.scalar(
         select(Project.id).where(
@@ -106,7 +106,7 @@ async def get_project_by_code(
     code: str,
     user: User = Depends(get_current_user),
     workspace_id: UUID = Depends(get_workspace_id),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = DbSession,
 ) -> Project:
     """Resolve a project by its human code (alias), e.g. `MUR` — case-insensitive.
 
@@ -138,7 +138,7 @@ async def update_project(
     project_id: UUID,
     body: ProjectUpdate,
     _: None = Depends(require_project_permission(Perm.PROJECT_EDIT)),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = DbSession,
 ) -> Project:
     project = await db.get(Project, project_id)
     assert project is not None  # guaranteed by the guard
@@ -175,7 +175,7 @@ async def archive_project(
     user: User = Depends(get_current_user),
     workspace_id: UUID = Depends(get_workspace_id),
     _: None = Depends(require_project_permission(Perm.PROJECT_ARCHIVE)),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = DbSession,
 ) -> Project:
     from datetime import UTC, datetime
 
@@ -201,7 +201,7 @@ async def unarchive_project(
     user: User = Depends(get_current_user),
     workspace_id: UUID = Depends(get_workspace_id),
     _: None = Depends(require_project_permission(Perm.PROJECT_ARCHIVE)),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = DbSession,
 ) -> Project:
     """Take a project back out of the archive (returns it to ACTIVE)."""
     project = await db.get(Project, project_id)
@@ -229,7 +229,7 @@ async def unarchive_project(
 async def list_members(
     project_id: UUID,
     _: None = Depends(require_project_permission(Perm.PROJECT_MEMBERS_VIEW)),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = DbSession,
 ) -> list[MemberOut]:
     rows = await db.execute(
         select(ProjectMember, User)
@@ -252,7 +252,7 @@ async def add_member(
     actor: User = Depends(get_current_user),
     workspace_id: UUID = Depends(get_workspace_id),
     _: None = Depends(require_project_permission(Perm.PROJECT_MEMBERS_MANAGE)),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = DbSession,
 ) -> MemberOut:
     # the target must be a member of this workspace
     in_ws = await db.scalar(
@@ -302,7 +302,7 @@ async def remove_member(
     actor: User = Depends(get_current_user),
     workspace_id: UUID = Depends(get_workspace_id),
     _: None = Depends(require_project_permission(Perm.PROJECT_MEMBERS_MANAGE)),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = DbSession,
 ) -> None:
     member = await db.scalar(
         select(ProjectMember).where(
@@ -335,7 +335,7 @@ async def remove_member(
 async def list_statuses(
     project_id: UUID,
     _: None = Depends(require_project_permission(Perm.BOARD_VIEW)),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = DbSession,
 ) -> list[TaskStatus]:
     return list(
         (
@@ -356,7 +356,7 @@ async def create_status(
     body: StatusCreate,
     workspace_id: UUID = Depends(get_workspace_id),
     _: None = Depends(require_project_permission(Perm.BOARD_MANAGE)),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = DbSession,
 ) -> TaskStatus:
     pos = body.position
     if pos is None:
@@ -391,7 +391,7 @@ async def update_status(
     status_id: UUID,
     body: StatusUpdate,
     _: None = Depends(require_project_permission(Perm.BOARD_MANAGE)),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = DbSession,
 ) -> TaskStatus:
     obj = await db.get(TaskStatus, status_id)
     if obj is None or obj.project_id != project_id:
@@ -413,7 +413,7 @@ async def delete_status(
     project_id: UUID,
     status_id: UUID,
     _: None = Depends(require_project_permission(Perm.BOARD_MANAGE)),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = DbSession,
 ) -> None:
     obj = await db.get(TaskStatus, status_id)
     if obj is None or obj.project_id != project_id:
@@ -438,7 +438,7 @@ async def delete_status(
 async def list_types(
     project_id: UUID,
     _: None = Depends(require_project_permission(Perm.BOARD_VIEW)),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = DbSession,
 ) -> list[TaskType]:
     return list(
         (
@@ -459,7 +459,7 @@ async def create_type(
     body: TypeCreate,
     workspace_id: UUID = Depends(get_workspace_id),
     _: None = Depends(require_project_permission(Perm.BOARD_MANAGE)),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = DbSession,
 ) -> TaskType:
     pos = body.position
     if pos is None:
@@ -490,7 +490,7 @@ async def update_type(
     type_id: UUID,
     body: TypeUpdate,
     _: None = Depends(require_project_permission(Perm.BOARD_MANAGE)),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = DbSession,
 ) -> TaskType:
     obj = await db.get(TaskType, type_id)
     if obj is None or obj.project_id != project_id:
@@ -508,7 +508,7 @@ async def delete_type(
     project_id: UUID,
     type_id: UUID,
     _: None = Depends(require_project_permission(Perm.BOARD_MANAGE)),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = DbSession,
 ) -> None:
     obj = await db.get(TaskType, type_id)
     if obj is None or obj.project_id != project_id:

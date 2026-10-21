@@ -3,7 +3,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.database import get_db
+from app.core.database import DbSession
 from app.core.deps import (
     get_current_user,
     get_workspace_id,
@@ -29,7 +29,7 @@ async def load_sprint(
     sprint_id: UUID,
     user: User = Depends(get_current_user),
     workspace_id: UUID = Depends(get_workspace_id),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = DbSession,
 ) -> Sprint:
     sprint = await db.get(Sprint, sprint_id)
     if sprint is None or sprint.workspace_id != workspace_id:
@@ -54,7 +54,7 @@ async def _require_manage(
 async def list_sprints(
     project_id: UUID,
     _: None = Depends(require_project_permission(Perm.SPRINT_VIEW)),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = DbSession,
 ) -> list[SprintOut]:
     return await service.list_sprints(db, project_id)
 
@@ -69,7 +69,7 @@ async def create_sprint(
     body: SprintCreate,
     workspace_id: UUID = Depends(get_workspace_id),
     _: None = Depends(require_project_permission(Perm.SPRINT_MANAGE)),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = DbSession,
 ) -> SprintOut:
     sprint = Sprint(
         workspace_id=workspace_id,
@@ -88,7 +88,7 @@ async def create_sprint(
 @router.get("/sprints/{sprint_id}", response_model=SprintOut)
 async def get_sprint(
     sprint: Sprint = Depends(load_sprint),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = DbSession,
 ) -> SprintOut:
     return service.to_out(sprint, await service.stats(db, sprint.id))
 
@@ -99,7 +99,7 @@ async def update_sprint(
     sprint: Sprint = Depends(load_sprint),
     user: User = Depends(get_current_user),
     workspace_id: UUID = Depends(get_workspace_id),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = DbSession,
 ) -> SprintOut:
     await _require_manage(db, user.id, workspace_id, sprint.project_id)
     for field in ("name", "goal", "start_date", "end_date"):
@@ -115,7 +115,7 @@ async def start_sprint(
     sprint: Sprint = Depends(load_sprint),
     user: User = Depends(get_current_user),
     workspace_id: UUID = Depends(get_workspace_id),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = DbSession,
 ) -> SprintOut:
     await _require_manage(db, user.id, workspace_id, sprint.project_id)
     try:
@@ -133,7 +133,7 @@ async def complete_sprint(
     sprint: Sprint = Depends(load_sprint),
     user: User = Depends(get_current_user),
     workspace_id: UUID = Depends(get_workspace_id),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = DbSession,
 ) -> SprintCompletionResult:
     await _require_manage(db, user.id, workspace_id, sprint.project_id)
     if sprint.status == "COMPLETED":

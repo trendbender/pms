@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.database import get_db
+from app.core.database import DbSession
 from app.core.deps import get_current_user, get_workspace_id
 from app.models.audit import ActivityLog
 from app.models.project import Project
@@ -38,7 +38,7 @@ async def load_task(
     task_id: UUID,
     user: User = Depends(get_current_user),
     workspace_id: UUID = Depends(get_workspace_id),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = DbSession,
 ) -> Task:
     """Fetch a live task the user may *see*. Hidden projects read as 404 (spec §7)."""
     task = await db.get(Task, task_id)
@@ -77,7 +77,7 @@ async def create_task(
     body: TaskCreate,
     user: User = Depends(get_current_user),
     workspace_id: UUID = Depends(get_workspace_id),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = DbSession,
 ) -> TaskOut:
     project = await db.get(Project, body.project_id)
     if project is None or project.workspace_id != workspace_id:
@@ -160,7 +160,7 @@ async def get_task_by_key(
     key: str,
     user: User = Depends(get_current_user),
     workspace_id: UUID = Depends(get_workspace_id),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = DbSession,
 ) -> TaskOut:
     """Resolve a task by its human key (e.g. ``SSK-23``). Keys are unique per
     workspace, so shared links can avoid exposing the opaque UUID."""
@@ -183,7 +183,7 @@ async def get_task_by_key(
 @router.get("/tasks/{task_id}", response_model=TaskOut)
 async def get_task(
     task: Task = Depends(load_task),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = DbSession,
 ) -> TaskOut:
     return await service.get_task_out(db, task)
 
@@ -193,7 +193,7 @@ async def list_tasks(
     project_id: UUID,
     user: User = Depends(get_current_user),
     workspace_id: UUID = Depends(get_workspace_id),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = DbSession,
     status_id: UUID | None = Query(default=None),
     category: str | None = Query(default=None),
     assignee_id: UUID | None = Query(default=None),
@@ -225,7 +225,7 @@ async def get_backlog(
     project_id: UUID,
     user: User = Depends(get_current_user),
     workspace_id: UUID = Depends(get_workspace_id),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = DbSession,
 ) -> list[TaskOut]:
     project = await db.get(Project, project_id)
     if project is None or project.workspace_id != workspace_id:
@@ -241,7 +241,7 @@ async def update_task(
     task: Task = Depends(load_task),
     user: User = Depends(get_current_user),
     workspace_id: UUID = Depends(get_workspace_id),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = DbSession,
 ) -> TaskOut:
     fields = body.model_dump(exclude_unset=True)
 
@@ -314,7 +314,7 @@ async def delete_task(
     task: Task = Depends(load_task),
     user: User = Depends(get_current_user),
     workspace_id: UUID = Depends(get_workspace_id),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = DbSession,
 ) -> None:
     await _require(db, user.id, workspace_id, task.project_id, Perm.TASK_DELETE)
     task.deleted_at = datetime.now(UTC)
@@ -341,7 +341,7 @@ async def change_status(
     task: Task = Depends(load_task),
     user: User = Depends(get_current_user),
     workspace_id: UUID = Depends(get_workspace_id),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = DbSession,
 ) -> TaskOut:
     await _require(db, user.id, workspace_id, task.project_id, Perm.TASK_CHANGE_STATUS)
     new_status = await service.validate_status(db, task.project_id, body.status_id)
@@ -374,7 +374,7 @@ async def get_board(
     project_id: UUID,
     user: User = Depends(get_current_user),
     workspace_id: UUID = Depends(get_workspace_id),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = DbSession,
 ) -> BoardOut:
     project = await db.get(Project, project_id)
     if project is None or project.workspace_id != workspace_id:
@@ -390,7 +390,7 @@ async def move_task(
     task: Task = Depends(load_task),
     user: User = Depends(get_current_user),
     workspace_id: UUID = Depends(get_workspace_id),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = DbSession,
 ) -> TaskOut:
     await _require(db, user.id, workspace_id, task.project_id, Perm.TASK_CHANGE_STATUS)
     new_status = await service.validate_status(db, task.project_id, body.status_id)
@@ -421,7 +421,7 @@ async def move_task(
 @router.get("/tasks/{task_id}/activity", response_model=list[ActivityOut])
 async def task_activity(
     task: Task = Depends(load_task),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = DbSession,
 ) -> list[ActivityLog]:
     return list(
         (

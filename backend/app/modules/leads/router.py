@@ -8,7 +8,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
-from app.core.database import get_db
+from app.core.database import DbSession
 from app.core.deps import get_current_user, get_workspace_id, require_project_permission
 from app.models.enums import LeadStageCategory, Priority
 from app.models.lead import Lead, LeadEvent, LeadField, LeadIngestToken, LeadStage
@@ -71,7 +71,7 @@ async def load_lead(
     lead_id: UUID,
     user: User = Depends(get_current_user),
     workspace_id: UUID = Depends(get_workspace_id),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = DbSession,
 ) -> Lead:
     lead = await db.get(Lead, lead_id)
     if lead is None or lead.workspace_id != workspace_id or lead.deleted_at is not None:
@@ -125,7 +125,7 @@ async def enable_leads(
     project_id: UUID,
     body: LeadsEnable,
     _: None = Depends(require_project_permission(Perm.LEAD_SETTINGS)),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = DbSession,
 ) -> LeadSettingsOut:
     project = await _project(db, project_id, enabled=False)
     await service.seed_preset(db, project, body.preset)
@@ -138,7 +138,7 @@ async def enable_leads(
 async def disable_leads(
     project_id: UUID,
     _: None = Depends(require_project_permission(Perm.LEAD_SETTINGS)),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = DbSession,
 ) -> LeadSettingsOut:
     # данные не удаляем: выключение прячет вкладку и закрывает приём
     project = await _project(db, project_id, enabled=False)
@@ -153,7 +153,7 @@ async def lead_settings(
     user: User = Depends(get_current_user),
     workspace_id: UUID = Depends(get_workspace_id),
     _: None = Depends(require_project_permission(Perm.PROJECT_VIEW)),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = DbSession,
 ) -> LeadSettingsOut:
     project = await _project(db, project_id, enabled=False)
     can_settings = await perms.has_project_permission(
@@ -173,7 +173,7 @@ async def create_stage(
     project_id: UUID,
     body: StageCreate,
     _: None = Depends(require_project_permission(Perm.LEAD_SETTINGS)),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = DbSession,
 ) -> LeadStage:
     project = await _project(db, project_id, enabled=False)
     existing = await service.stages(db, project_id)
@@ -216,7 +216,7 @@ async def update_stage(
     body: StageUpdate,
     user: User = Depends(get_current_user),
     workspace_id: UUID = Depends(get_workspace_id),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = DbSession,
 ) -> LeadStage:
     obj = await _load_settings_obj(db, LeadStage, stage_id, user, workspace_id)
     patch = body.model_dump(exclude_unset=True)
@@ -243,7 +243,7 @@ async def delete_stage(
     stage_id: UUID,
     user: User = Depends(get_current_user),
     workspace_id: UUID = Depends(get_workspace_id),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = DbSession,
 ) -> None:
     obj = await _load_settings_obj(db, LeadStage, stage_id, user, workspace_id)
     used = await db.scalar(select(func.count(Lead.id)).where(Lead.stage_id == obj.id))
@@ -260,7 +260,7 @@ async def create_field(
     project_id: UUID,
     body: FieldCreate,
     _: None = Depends(require_project_permission(Perm.LEAD_SETTINGS)),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = DbSession,
 ) -> LeadField:
     project = await _project(db, project_id, enabled=False)
     if body.type == "select" and not body.options:
@@ -294,7 +294,7 @@ async def update_field(
     body: FieldUpdate,
     user: User = Depends(get_current_user),
     workspace_id: UUID = Depends(get_workspace_id),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = DbSession,
 ) -> LeadField:
     obj = await _load_settings_obj(db, LeadField, field_id, user, workspace_id)
     for field, value in body.model_dump(exclude_unset=True).items():
@@ -308,7 +308,7 @@ async def delete_field(
     field_id: UUID,
     user: User = Depends(get_current_user),
     workspace_id: UUID = Depends(get_workspace_id),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = DbSession,
 ) -> None:
     # значения в leads.data не трогаем: поле можно вернуть, история не теряется
     obj = await _load_settings_obj(db, LeadField, field_id, user, workspace_id)
@@ -324,7 +324,7 @@ async def create_token(
     body: TokenCreate,
     user: User = Depends(get_current_user),
     _: None = Depends(require_project_permission(Perm.LEAD_SETTINGS)),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = DbSession,
 ) -> TokenCreated:
     project = await _project(db, project_id, enabled=False)
     raw, token_hash, prefix = service.new_token()
@@ -346,7 +346,7 @@ async def revoke_token(
     token_id: UUID,
     user: User = Depends(get_current_user),
     workspace_id: UUID = Depends(get_workspace_id),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = DbSession,
 ) -> LeadIngestToken:
     obj = await _load_settings_obj(db, LeadIngestToken, token_id, user, workspace_id)
     if obj.revoked_at is None:
@@ -371,7 +371,7 @@ async def list_leads(
     limit: int = Query(default=200, ge=1, le=1000),
     offset: int = Query(default=0, ge=0),
     _: None = Depends(require_project_permission(Perm.LEAD_VIEW)),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = DbSession,
 ) -> list[LeadOut]:
     await _project(db, project_id)
     stmt = select(Lead).where(Lead.project_id == project_id, Lead.deleted_at.is_(None))
@@ -413,7 +413,7 @@ async def create_lead(
     user: User = Depends(get_current_user),
     workspace_id: UUID = Depends(get_workspace_id),
     _: None = Depends(require_project_permission(Perm.LEAD_MANAGE)),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = DbSession,
 ) -> LeadOut:
     project = await _project(db, project_id)
     await _check_owner(db, workspace_id, project_id, body.owner_id)
@@ -446,7 +446,7 @@ async def lead_board(
     project_id: UUID,
     closed_days: int = Query(default=30, ge=0, le=3650),
     _: None = Depends(require_project_permission(Perm.LEAD_VIEW)),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = DbSession,
 ) -> LeadBoardOut:
     """Доска по этапам. Закрытые (WON/LOST) показываются только за последние
     `closed_days` дней, иначе колонки «Выигран/Проигран» растут бесконечно."""
@@ -487,7 +487,7 @@ async def lead_stats(
     period_from: datetime | None = Query(default=None, alias="from"),
     period_to: datetime | None = Query(default=None, alias="to"),
     _: None = Depends(require_project_permission(Perm.LEAD_VIEW)),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = DbSession,
 ) -> LeadStatsOut:
     await _project(db, project_id)
     now = datetime.now(UTC)
@@ -501,7 +501,7 @@ async def get_lead_by_key(
     key: str,
     user: User = Depends(get_current_user),
     workspace_id: UUID = Depends(get_workspace_id),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = DbSession,
 ) -> LeadOut:
     lead = await db.scalar(
         select(Lead).where(
@@ -517,7 +517,7 @@ async def get_lead_by_key(
 
 
 @router.get("/leads/{lead_id}", response_model=LeadOut)
-async def get_lead(lead: Lead = Depends(load_lead), db: AsyncSession = Depends(get_db)) -> LeadOut:
+async def get_lead(lead: Lead = Depends(load_lead), db: AsyncSession = DbSession) -> LeadOut:
     return await service.to_out(db, lead)
 
 
@@ -527,7 +527,7 @@ async def update_lead(
     lead: Lead = Depends(load_lead),
     user: User = Depends(get_current_user),
     workspace_id: UUID = Depends(get_workspace_id),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = DbSession,
 ) -> LeadOut:
     await _require(db, user, workspace_id, lead.project_id, Perm.LEAD_MANAGE)
     patch = body.model_dump(exclude_unset=True)
@@ -568,7 +568,7 @@ async def change_lead_stage(
     lead: Lead = Depends(load_lead),
     user: User = Depends(get_current_user),
     workspace_id: UUID = Depends(get_workspace_id),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = DbSession,
 ) -> LeadOut:
     await _require(db, user, workspace_id, lead.project_id, Perm.LEAD_MANAGE)
     stage = await service.stage_by_ref(db, lead.project_id, body.stage_id, body.stage)
@@ -583,7 +583,7 @@ async def delete_lead(
     lead: Lead = Depends(load_lead),
     user: User = Depends(get_current_user),
     workspace_id: UUID = Depends(get_workspace_id),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = DbSession,
 ) -> None:
     await _require(db, user, workspace_id, lead.project_id, Perm.LEAD_DELETE)
     lead.deleted_at = datetime.now(UTC)
@@ -593,7 +593,7 @@ async def delete_lead(
 
 @router.get("/leads/{lead_id}/events", response_model=list[LeadEventOut])
 async def lead_events(
-    lead: Lead = Depends(load_lead), db: AsyncSession = Depends(get_db)
+    lead: Lead = Depends(load_lead), db: AsyncSession = DbSession
 ) -> list[LeadEvent]:
     stmt = (
         select(LeadEvent)
@@ -609,7 +609,7 @@ async def comment_lead(
     lead: Lead = Depends(load_lead),
     user: User = Depends(get_current_user),
     workspace_id: UUID = Depends(get_workspace_id),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = DbSession,
 ) -> LeadEvent:
     await _require(db, user, workspace_id, lead.project_id, Perm.LEAD_MANAGE)
     ev = LeadEvent(
@@ -630,7 +630,7 @@ async def create_lead_task(
     lead: Lead = Depends(load_lead),
     user: User = Depends(get_current_user),
     workspace_id: UUID = Depends(get_workspace_id),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = DbSession,
 ) -> LeadOut:
     """Работа по лиду (аудит, КП, проверка) это задача того же проекта со ссылкой
     в обе стороны. У лида одна связанная задача; повторный вызов даёт 409."""
@@ -706,7 +706,7 @@ async def _ingest_token(
 async def ingest_lead(
     body: LeadIngest,
     x_lead_token: str | None = Header(default=None),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = DbSession,
 ) -> LeadIngestOut:
     """Приём лида по ключу проекта (вебхук формы, адаптер площадки).
 

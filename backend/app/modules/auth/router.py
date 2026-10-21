@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.database import get_db
+from app.core.database import DbSession
 from app.core.deps import get_current_user, get_workspace_id
 from app.core.security import (
     REFRESH_TOKEN,
@@ -30,7 +30,7 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 
 
 @router.post("/login", response_model=TokenPair)
-async def login(body: LoginRequest, db: AsyncSession = Depends(get_db)) -> TokenPair:
+async def login(body: LoginRequest, db: AsyncSession = DbSession) -> TokenPair:
     user = await db.scalar(select(User).where(User.email == body.email.lower()))
     # Constant-ish behaviour: always run a verify to avoid user enumeration timing.
     if user is None or not user.password_hash:
@@ -55,7 +55,7 @@ async def login(body: LoginRequest, db: AsyncSession = Depends(get_db)) -> Token
 
 
 @router.post("/refresh", response_model=TokenPair)
-async def refresh(body: RefreshRequest, db: AsyncSession = Depends(get_db)) -> TokenPair:
+async def refresh(body: RefreshRequest, db: AsyncSession = DbSession) -> TokenPair:
     payload = decode_token(body.refresh_token)
     if not payload or payload.get("type") != REFRESH_TOKEN:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid refresh token")
@@ -96,7 +96,7 @@ async def reset_password(body: ResetPasswordRequest) -> dict:
 async def me(
     user: User = Depends(get_current_user),
     workspace_id: UUID = Depends(get_workspace_id),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = DbSession,
 ) -> MeResponse:
     role = await db.scalar(
         select(WorkspaceMember.system_role).where(

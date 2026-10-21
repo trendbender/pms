@@ -3,7 +3,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.database import get_db
+from app.core.database import DbSession
 from app.core.deps import get_current_user, get_workspace_id, load_project
 from app.models.project import Project
 from app.models.user import User
@@ -22,7 +22,7 @@ router = APIRouter(tags=["dashboard"])
 async def my_tasks(
     user: User = Depends(get_current_user),
     workspace_id: UUID = Depends(get_workspace_id),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = DbSession,
 ) -> list[TaskCard]:
     return await service.my_tasks(db, user.id, workspace_id)
 
@@ -31,7 +31,7 @@ async def my_tasks(
 async def my_reviews(
     user: User = Depends(get_current_user),
     workspace_id: UUID = Depends(get_workspace_id),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = DbSession,
 ) -> list[TaskCard]:
     return await service.my_reviews(db, user.id, workspace_id)
 
@@ -40,7 +40,7 @@ async def my_reviews(
 async def all_tasks(
     user: User = Depends(get_current_user),
     workspace_id: UUID = Depends(get_workspace_id),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = DbSession,
     project_id: UUID | None = Query(default=None),
     assignee_id: UUID | None = Query(default=None),
     reviewer_id: UUID | None = Query(default=None),
@@ -68,7 +68,7 @@ async def all_tasks(
 async def portfolio(
     user: User = Depends(get_current_user),
     workspace_id: UUID = Depends(get_workspace_id),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = DbSession,
 ) -> PortfolioOut:
     return await service.portfolio(db, user.id, workspace_id)
 
@@ -77,6 +77,6 @@ async def portfolio(
 async def project_dashboard(
     project: Project = Depends(load_project),
     user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = DbSession,
 ) -> ProjectDashboard:
     return await service.project_dashboard(db, user.id, project)

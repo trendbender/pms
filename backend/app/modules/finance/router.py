@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.database import get_db
+from app.core.database import DbSession
 from app.core.deps import get_current_user, get_workspace_id, require_project_permission
 from app.models.enums import PaymentStatus
 from app.models.finance import Contract, Payment
@@ -40,7 +40,7 @@ async def load_payment(
     payment_id: UUID,
     user: User = Depends(get_current_user),
     workspace_id: UUID = Depends(get_workspace_id),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = DbSession,
 ) -> Payment:
     obj = await db.get(Payment, payment_id)
     if obj is None or obj.workspace_id != workspace_id or obj.deleted_at is not None:
@@ -90,7 +90,7 @@ async def list_payments(
     include_paid: bool = True,
     user: User = Depends(get_current_user),
     workspace_id: UUID = Depends(get_workspace_id),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = DbSession,
 ) -> list[PaymentOut]:
     projects = await _projects_for_finance(db, user, workspace_id)
     if project_id and project_id not in projects:
@@ -109,7 +109,7 @@ async def payment_calendar(
     weeks: int = Query(default=4, ge=1, le=52),
     user: User = Depends(get_current_user),
     workspace_id: UUID = Depends(get_workspace_id),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = DbSession,
 ) -> CalendarOut:
     projects = await _projects_for_finance(db, user, workspace_id)
     return await service.calendar(db, projects, weeks=weeks)
@@ -126,7 +126,7 @@ async def create_payment(
     user: User = Depends(get_current_user),
     workspace_id: UUID = Depends(get_workspace_id),
     _: None = Depends(require_project_permission(Perm.FINANCE_MANAGE)),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = DbSession,
 ) -> PaymentOut:
     await _check_links(db, project_id, body.contract_id, body.initiative_id)
     obj = Payment(
@@ -145,7 +145,7 @@ async def create_payment(
 async def project_payments(
     project_id: UUID,
     _: None = Depends(require_project_permission(Perm.FINANCE_VIEW)),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = DbSession,
 ) -> list[PaymentOut]:
     project = await db.get(Project, project_id)
     return await service.list_payments(db, {project_id: project}, project_id=project_id)
@@ -157,7 +157,7 @@ async def update_payment(
     payment: Payment = Depends(load_payment),
     user: User = Depends(get_current_user),
     workspace_id: UUID = Depends(get_workspace_id),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = DbSession,
 ) -> PaymentOut:
     await _require_manage(db, user.id, workspace_id, payment.project_id)
     patch = body.model_dump(exclude_unset=True)
@@ -180,7 +180,7 @@ async def mark_invoiced(
     payment: Payment = Depends(load_payment),
     user: User = Depends(get_current_user),
     workspace_id: UUID = Depends(get_workspace_id),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = DbSession,
 ) -> PaymentOut:
     await _require_manage(db, user.id, workspace_id, payment.project_id)
     payment.status = PaymentStatus.INVOICED.value
@@ -199,7 +199,7 @@ async def mark_paid(
     payment: Payment = Depends(load_payment),
     user: User = Depends(get_current_user),
     workspace_id: UUID = Depends(get_workspace_id),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = DbSession,
 ) -> PaymentOut:
     await _require_manage(db, user.id, workspace_id, payment.project_id)
     payment.status = PaymentStatus.PAID.value
@@ -217,7 +217,7 @@ async def delete_payment(
     payment: Payment = Depends(load_payment),
     user: User = Depends(get_current_user),
     workspace_id: UUID = Depends(get_workspace_id),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = DbSession,
 ) -> None:
     await _require_manage(db, user.id, workspace_id, payment.project_id)
     # Мягкое удаление: платёж это финансовая история, физически её не стираем.
@@ -233,7 +233,7 @@ async def delete_payment(
 async def list_contracts(
     project_id: UUID,
     _: None = Depends(require_project_permission(Perm.FINANCE_VIEW)),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = DbSession,
 ) -> list[ContractOut]:
     stmt = (
         select(Contract)
@@ -253,7 +253,7 @@ async def create_contract(
     body: ContractCreate,
     workspace_id: UUID = Depends(get_workspace_id),
     _: None = Depends(require_project_permission(Perm.FINANCE_MANAGE)),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = DbSession,
 ) -> ContractOut:
     obj = Contract(workspace_id=workspace_id, project_id=project_id, **body.model_dump())
     db.add(obj)
@@ -267,7 +267,7 @@ async def update_contract(
     body: ContractUpdate,
     user: User = Depends(get_current_user),
     workspace_id: UUID = Depends(get_workspace_id),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = DbSession,
 ) -> ContractOut:
     obj = await db.get(Contract, contract_id)
     if obj is None or obj.workspace_id != workspace_id:

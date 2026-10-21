@@ -3,7 +3,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.database import get_db
+from app.core.database import DbSession
 from app.core.deps import (
     get_current_user,
     get_workspace_id,
@@ -29,7 +29,7 @@ async def load_initiative(
     initiative_id: UUID,
     user: User = Depends(get_current_user),
     workspace_id: UUID = Depends(get_workspace_id),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = DbSession,
 ) -> Initiative:
     obj = await db.get(Initiative, initiative_id)
     if obj is None or obj.workspace_id != workspace_id:
@@ -54,7 +54,7 @@ async def _require_edit(
 async def list_initiatives(
     project_id: UUID,
     _: None = Depends(require_project_permission(Perm.PROJECT_VIEW)),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = DbSession,
 ) -> list[InitiativeOut]:
     return await service.list_initiatives(db, project_id)
 
@@ -69,7 +69,7 @@ async def create_initiative(
     body: InitiativeCreate,
     workspace_id: UUID = Depends(get_workspace_id),
     _: None = Depends(require_project_permission(Perm.PROJECT_EDIT)),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = DbSession,
 ) -> InitiativeOut:
     obj = Initiative(
         workspace_id=workspace_id,
@@ -86,7 +86,7 @@ async def create_initiative(
 @router.get("/initiatives/{initiative_id}", response_model=InitiativeOut)
 async def get_initiative(
     initiative: Initiative = Depends(load_initiative),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = DbSession,
 ) -> InitiativeOut:
     return await service.get_out(db, initiative)
 
@@ -94,7 +94,7 @@ async def get_initiative(
 @router.get("/initiatives/{initiative_id}/tasks", response_model=list[TaskOut])
 async def initiative_tasks(
     initiative: Initiative = Depends(load_initiative),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = DbSession,
 ) -> list[TaskOut]:
     return await task_service.list_project_tasks(
         db, project_id=initiative.project_id, initiative_id=initiative.id
@@ -107,7 +107,7 @@ async def update_initiative(
     initiative: Initiative = Depends(load_initiative),
     user: User = Depends(get_current_user),
     workspace_id: UUID = Depends(get_workspace_id),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = DbSession,
 ) -> InitiativeOut:
     await _require_edit(db, user.id, workspace_id, initiative.project_id)
     if body.name is not None:
@@ -125,7 +125,7 @@ async def delete_initiative(
     initiative: Initiative = Depends(load_initiative),
     user: User = Depends(get_current_user),
     workspace_id: UUID = Depends(get_workspace_id),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = DbSession,
 ) -> None:
     await _require_edit(db, user.id, workspace_id, initiative.project_id)
     # tasks keep existing; their initiative_id is cleared by the FK (ON DELETE SET NULL)

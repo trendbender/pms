@@ -7,7 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
-from app.core.database import get_db
+from app.core.database import DbSession
 from app.core.deps import get_current_user, get_workspace_id
 from app.models.attachment import Attachment
 from app.models.task import Task
@@ -33,7 +33,7 @@ async def _load_attachment(
     attachment_id: UUID,
     user: User = Depends(get_current_user),
     workspace_id: UUID = Depends(get_workspace_id),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = DbSession,
 ) -> Attachment:
     att = await db.get(Attachment, attachment_id)
     if att is None or att.workspace_id != workspace_id or att.deleted_at is not None:
@@ -49,7 +49,7 @@ async def _load_attachment(
 @router.get("/tasks/{task_id}/attachments", response_model=list[AttachmentOut])
 async def list_attachments(
     task: Task = Depends(load_task),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = DbSession,
 ) -> list[Attachment]:
     return list(
         (
@@ -72,7 +72,7 @@ async def upload_attachment(
     task: Task = Depends(load_task),
     user: User = Depends(get_current_user),
     workspace_id: UUID = Depends(get_workspace_id),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = DbSession,
 ) -> Attachment:
     await _require(db, user.id, workspace_id, task.project_id, Perm.ATTACHMENT_UPLOAD)
 
@@ -127,7 +127,7 @@ async def delete_attachment(
     att: Attachment = Depends(_load_attachment),
     user: User = Depends(get_current_user),
     workspace_id: UUID = Depends(get_workspace_id),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = DbSession,
 ) -> None:
     task = await db.get(Task, att.task_id)
     if task is None:  # _load_attachment already validated it; guard for the type checker

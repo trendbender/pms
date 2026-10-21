@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.database import get_db
+from app.core.database import DbSession
 from app.core.deps import get_current_user, get_workspace_id
 from app.models.comment import Comment
 from app.models.task import Task
@@ -24,7 +24,7 @@ async def _load_comment(
     comment_id: UUID,
     user: User = Depends(get_current_user),
     workspace_id: UUID = Depends(get_workspace_id),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = DbSession,
 ) -> Comment:
     comment = await db.get(Comment, comment_id)
     if comment is None or comment.workspace_id != workspace_id or comment.deleted_at is not None:
@@ -41,7 +41,7 @@ async def _load_comment(
 @router.get("/tasks/{task_id}/comments", response_model=list[CommentOut])
 async def list_comments(
     task: Task = Depends(load_task),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = DbSession,
 ) -> list[Comment]:
     return list(
         (
@@ -62,7 +62,7 @@ async def create_comment(
     task: Task = Depends(load_task),
     user: User = Depends(get_current_user),
     workspace_id: UUID = Depends(get_workspace_id),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = DbSession,
 ) -> Comment:
     if not await perms.has_project_permission(
         db, user.id, workspace_id, task.project_id, Perm.COMMENT_CREATE
@@ -97,7 +97,7 @@ async def update_comment(
     comment: Comment = Depends(_load_comment),
     user: User = Depends(get_current_user),
     workspace_id: UUID = Depends(get_workspace_id),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = DbSession,
 ) -> Comment:
     task = await db.get(Task, comment.task_id)
     assert task is not None
@@ -118,7 +118,7 @@ async def delete_comment(
     comment: Comment = Depends(_load_comment),
     user: User = Depends(get_current_user),
     workspace_id: UUID = Depends(get_workspace_id),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = DbSession,
 ) -> None:
     task = await db.get(Task, comment.task_id)
     assert task is not None

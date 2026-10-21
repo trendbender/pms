@@ -7,7 +7,7 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.database import get_db
+from app.core.database import DbSession
 from app.core.security import ACCESS_TOKEN, decode_token
 from app.models.project import Project
 from app.models.user import User
@@ -20,7 +20,7 @@ _bearer = HTTPBearer(auto_error=False)
 
 async def get_current_user(
     creds: HTTPAuthorizationCredentials | None = Depends(_bearer),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = DbSession,
 ) -> User:
     if creds is None:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Not authenticated")
@@ -42,7 +42,7 @@ async def get_current_user(
 
 async def get_workspace_id(
     user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = DbSession,
 ) -> UUID:
     """Resolve the current workspace.
 
@@ -63,7 +63,7 @@ def require_workspace_permission(perm: Perm):
     async def _dep(
         user: User = Depends(get_current_user),
         workspace_id: UUID = Depends(get_workspace_id),
-        db: AsyncSession = Depends(get_db),
+        db: AsyncSession = DbSession,
     ) -> None:
         if not await perms.has_workspace_permission(db, user.id, workspace_id, perm):
             raise HTTPException(status.HTTP_403_FORBIDDEN, f"Missing permission: {perm}")
@@ -75,7 +75,7 @@ async def load_project(
     project_id: UUID,
     user: User = Depends(get_current_user),
     workspace_id: UUID = Depends(get_workspace_id),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = DbSession,
 ) -> Project:
     """Fetch a project in the current workspace the user is allowed to *see*.
 
@@ -99,7 +99,7 @@ def require_project_permission(perm: Perm):
         project_id: UUID,
         user: User = Depends(get_current_user),
         workspace_id: UUID = Depends(get_workspace_id),
-        db: AsyncSession = Depends(get_db),
+        db: AsyncSession = DbSession,
     ) -> None:
         # existence + visibility first, so missing view rights read as 404
         project = await db.get(Project, project_id)

@@ -32,6 +32,8 @@ async def _schema():
 
 
 async def _override_get_db():
+    # Overrides replace only the callable: scope="function" comes from DbSession at the
+    # call site, so commit here also runs before the response (test_commit_before_response).
     async with _Session() as session:
         try:
             yield session

@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.database import get_db
+from app.core.database import DbSession
 from app.core.deps import get_current_user, get_workspace_id, require_workspace_permission
 from app.core.security import hash_password
 from app.models.user import User
@@ -34,7 +34,7 @@ async def _role_map(db: AsyncSession, workspace_id: UUID) -> dict[UUID, str]:
 async def list_users(
     workspace_id: UUID = Depends(get_workspace_id),
     _: None = Depends(require_workspace_permission(Perm.WORKSPACE_VIEW)),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = DbSession,
 ) -> list[UserOut]:
     roles = await _role_map(db, workspace_id)
     users = (
@@ -60,7 +60,7 @@ async def invite_user(
     actor: User = Depends(get_current_user),
     workspace_id: UUID = Depends(get_workspace_id),
     _: None = Depends(require_workspace_permission(Perm.WORKSPACE_MANAGE)),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = DbSession,
 ) -> UserOut:
     email = body.email.lower()
     existing = await db.scalar(select(User).where(User.email == email))
@@ -106,7 +106,7 @@ async def update_me(
     body: UpdateMeRequest,
     user: User = Depends(get_current_user),
     workspace_id: UUID = Depends(get_workspace_id),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = DbSession,
 ) -> UserOut:
     """Any authenticated user updates their own profile (name, UI language)."""
     if body.name is not None:
@@ -136,7 +136,7 @@ async def get_user(
     user_id: UUID,
     workspace_id: UUID = Depends(get_workspace_id),
     _: None = Depends(require_workspace_permission(Perm.WORKSPACE_VIEW)),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = DbSession,
 ) -> UserOut:
     roles = await _role_map(db, workspace_id)
     if user_id not in roles:
@@ -161,7 +161,7 @@ async def update_user(
     actor: User = Depends(get_current_user),
     workspace_id: UUID = Depends(get_workspace_id),
     _: None = Depends(require_workspace_permission(Perm.WORKSPACE_MANAGE)),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = DbSession,
 ) -> UserOut:
     membership = await db.scalar(
         select(WorkspaceMember).where(

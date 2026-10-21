@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.database import get_db
+from app.core.database import DbSession
 from app.core.deps import get_current_user, get_workspace_id
 from app.models.notification import Notification
 from app.models.user import User
@@ -18,7 +18,7 @@ router = APIRouter(tags=["notifications"])
 async def list_notifications(
     user: User = Depends(get_current_user),
     workspace_id: UUID = Depends(get_workspace_id),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = DbSession,
     unread: bool = Query(default=False),
     limit: int = Query(default=50, ge=1, le=200),
 ) -> list[Notification]:
@@ -35,7 +35,7 @@ async def list_notifications(
 async def unread_count(
     user: User = Depends(get_current_user),
     workspace_id: UUID = Depends(get_workspace_id),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = DbSession,
 ) -> UnreadCount:
     n = await db.scalar(
         select(func.count())
@@ -53,7 +53,7 @@ async def unread_count(
 async def mark_read(
     notification_id: UUID,
     user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = DbSession,
 ) -> Notification:
     n = await db.get(Notification, notification_id)
     if n is None or n.user_id != user.id:
@@ -68,7 +68,7 @@ async def mark_read(
 async def mark_all_read(
     user: User = Depends(get_current_user),
     workspace_id: UUID = Depends(get_workspace_id),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = DbSession,
 ) -> UnreadCount:
     await db.execute(
         update(Notification)

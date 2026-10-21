@@ -4,7 +4,7 @@ listing with filters, status transitions with review/blocker/done semantics."""
 from datetime import UTC, datetime
 from uuid import UUID
 
-from sqlalchemy import Select, select
+from sqlalchemy import Select, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.enums import StatusCategory
@@ -161,9 +161,15 @@ async def create_task(
     start_at: datetime | None,
     due_at: datetime | None,
 ) -> Task:
-    # allocate the next per-project number and build the workspace-unique key
-    project.task_counter += 1
-    number = project.task_counter
+    # allocate the next per-project number and build the workspace-unique key.
+    # One atomic UPDATE ... RETURNING: a parallel create waits on the project row lock
+    # and then increments the committed value (a Python `+= 1` gave both the same number).
+    number = await db.scalar(
+        update(Project)
+        .where(Project.id == project.id)
+        .values(task_counter=Project.task_counter + 1)
+        .returning(Project.task_counter)
+    )
     key = f"{project.code}-{number}"
 
     # append to the BOTTOM of the target column (fractional ordering): the board

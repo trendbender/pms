@@ -117,6 +117,11 @@ def _lead_url(lead: Lead) -> str:
     return f"{settings.public_url.rstrip('/')}/l/{lead.key.lower()}"
 
 
+def _violated(exc: IntegrityError) -> str | None:
+    """Имя нарушенного ограничения (asyncpg кладёт его в исходное исключение)."""
+    return getattr(getattr(exc.orig, "__cause__", None), "constraint_name", None)
+
+
 # ------------------------------------------------------------ settings
 
 
@@ -434,7 +439,9 @@ async def create_lead(
                 db, project=project, stage=stage, title=body.title,
                 values=values, data=data, actor_id=user.id,
             )
-    except IntegrityError:
+    except IntegrityError as e:
+        if _violated(e) != "uq_lead_external":
+            raise
         raise HTTPException(
             status.HTTP_409_CONFLICT, "Lead with this source and external_id exists"
         ) from None
@@ -779,24 +786,30 @@ async def ingest_lead(
     values["source"] = body.source
     if stage.category == LeadStageCategory.LOST:
         values["lost_reason"] = body.lost_reason
+    # откат savepoint экспирит project/token, а ленивой подгрузки в async нет: id заранее
+    project_id, token_id = project.id, token.id
     try:
         async with db.begin_nested():
             lead = await service.create_lead(
                 db, project=project, stage=stage, title=title, values=values, data=data,
-                actor_id=None, token_id=token.id, event_data={"via": token.label},
+                actor_id=None, token_id=token_id, event_data={"via": token.label},
             )
-    except IntegrityError:
-        # два одинаковых вебхука одновременно: второй проиграл гонку, отдаём первый
+    except IntegrityError as e:
+        # два одинаковых вебхука одновременно: второй проиграл гонку, отдаём первый.
+        # Только по uq_lead_external: без external_id «первого» нет, и поиск по
+        # external_id IS NULL вернул бы чужой лид вместо нового
+        if _violated(e) != "uq_lead_external":
+            raise
         lead = await db.scalar(
             select(Lead).where(
-                Lead.project_id == project.id,
+                Lead.project_id == project_id,
                 Lead.source == body.source,
                 Lead.external_id == body.external_id,
             )
         )
         if lead is None:
             raise
-        await service.record_event(db, lead, "ingest.repeat", token_id=token.id, data={})
+        await service.record_event(db, lead, "ingest.repeat", token_id=token_id, data={})
         await db.flush()
         current = await db.get(LeadStage, lead.stage_id)
         return LeadIngestOut(

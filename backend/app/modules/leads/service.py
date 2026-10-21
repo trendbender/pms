@@ -10,7 +10,7 @@ from typing import Any
 from uuid import UUID
 
 from fastapi import HTTPException, status
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.enums import LeadFieldType, LeadStageCategory
@@ -254,8 +254,13 @@ async def create_lead(
     token_id: UUID | None = None,
     event_data: dict | None = None,
 ) -> Lead:
-    project.lead_counter += 1
-    number = project.lead_counter
+    # atomic, like task numbers: a parallel create waits on the project row lock
+    number = await db.scalar(
+        update(Project)
+        .where(Project.id == project.id)
+        .values(lead_counter=Project.lead_counter + 1)
+        .returning(Project.lead_counter)
+    )
     now = datetime.now(UTC)
     lead = Lead(
         workspace_id=project.workspace_id,

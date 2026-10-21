@@ -25,6 +25,24 @@ failure was invisible to a client that already had `201`. Seen on pmsdemo
   (and 200/200 each without the added latency). Probe for a stage/demo stack:
   `scripts/commit-race-probe.py`.
 
+**Fix: lead and task numbers under parallel creates.** `lead_counter` /
+`task_counter` were incremented in Python, so two simultaneous creates in one
+project got the same number: `409 "source and external_id exists"` on leads
+(any IntegrityError was reported that way), `500` on tasks. In ingest without
+`external_id` the fallback looked up `external_id IS NULL` and could return
+someone else's existing lead as `created=False`, losing the new one; with the
+same `external_id` the dedup branch itself crashed (`MissingGreenlet` on the
+project expired by the savepoint rollback).
+
+- The number comes from one `UPDATE projects SET counter = counter + 1 ...
+  RETURNING`: a parallel create waits on the project row lock and gets the
+  next number. A losing ingest rolls back its savepoint and does not consume one.
+- Only `uq_lead_external` maps to 409 / the ingest dedup; other integrity
+  errors are raised as they are.
+- Tests `tests/test_key_counters_concurrency.py` (12 parallel creates via
+  `asyncio.gather`, each on its own connection): leads, tasks, ingest without
+  and with the same `external_id`. All 4 were red before the fix, green 5/5 runs after.
+
 ## 0.3.0 — 2026-10-18
 
 **Leads & funnels**, opt-in per project.

@@ -830,3 +830,67 @@ export const createLeadTask = (id: string) => api<Lead>(`/leads/${id}/task`, jso
 
 // Короткая ссылка на лид: /l/kl-l-3 (как /t/ для задач)
 export const leadHref = (key: string) => `/l/${key.toLowerCase()}`;
+
+// ---- Реестр решений (копия из вики, решение _global:P-022) ----
+
+export interface Decision {
+  id: string;
+  registry: string;
+  project_id: string | null;
+  project_code: string | null;
+  ref: string;
+  full_ref: string;
+  area: string | null;
+  area_title: string | null;
+  status: "accepted" | "open" | "superseded" | "rejected" | string;
+  question: string;
+  decision: string | null;
+  decided_by: string | null;
+  decided_on: string | null;
+  source: string | null;
+  applies: string | null;
+  supersedes: string | null;
+  superseded_by: string | null;
+  keys: string[];
+  aliases: string[];
+  task_keys: string[];
+  synced_at: string;
+}
+
+export interface DecisionTask {
+  key: string;
+  title: string;
+  status_name: string;
+  status_category: string;
+}
+
+export interface DecisionDetail extends Decision {
+  tasks: DecisionTask[];
+}
+
+export interface DecisionFilter {
+  q?: string;
+  status?: string;
+  area?: string;
+}
+
+const decisionQuery = (f: DecisionFilter) => {
+  const p = new URLSearchParams();
+  if (f.q) p.set("q", f.q);
+  if (f.status) p.set("status", f.status);
+  if (f.area) p.set("area", f.area);
+  const s = p.toString();
+  return s ? `?${s}` : "";
+};
+
+export const listProjectDecisions = (projectId: string, f: DecisionFilter = {}) =>
+  api<Decision[]>(`/projects/${projectId}/decisions${decisionQuery(f)}`);
+export const listGlobalDecisions = (f: DecisionFilter = {}) =>
+  api<Decision[]>(`/decisions/global${decisionQuery(f)}`);
+export const getDecisionByRef = (ref: string) =>
+  api<DecisionDetail>(`/decisions/by-ref/${encodeURIComponent(ref)}`);
+export const getTaskDecisions = (key: string) =>
+  api<Decision[]>(`/decisions/by-task/${encodeURIComponent(key)}`);
+
+// Короткая ссылка на решение: /d/ssk-p-030, у _global префикс G (/d/g-p-022)
+export const decisionHref = (fullRef: string) => `/d/${fullRef.toLowerCase()}`;

@@ -104,6 +104,9 @@ export default function SprintsPage() {
             <Link href={`/projects/${ref}`} className="text-muted hover:underline">
               {t("board.board")}
             </Link>
+            <Link href={`/projects/${ref}/decisions`} className="text-muted hover:underline">
+              {t("decisions.tab")}
+            </Link>
             <span className="font-medium text-ink">{t("board.sprints")}</span>
             <Link
               href={`/projects/${ref}/settings`}

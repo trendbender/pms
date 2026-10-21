@@ -4,6 +4,7 @@ from app.models.attachment import Attachment
 from app.models.audit import ActivityLog, AuditLog
 from app.models.base import Base
 from app.models.comment import Comment
+from app.models.decision import Decision
 from app.models.finance import Contract, Payment
 from app.models.initiative import Initiative
 from app.models.lead import Lead, LeadEvent, LeadField, LeadIngestToken, LeadStage
@@ -27,6 +28,7 @@ __all__ = [
     "TaskType",
     "TaskStatus",
     "Comment",
+    "Decision",
     "Contract",
     "Payment",
     "Lead",

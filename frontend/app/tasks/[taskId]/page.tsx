@@ -9,6 +9,7 @@ import remarkBreaks from "remark-breaks";
 import {
   ApiError,
   Attachment,
+  Decision,
   Project,
   TaskActivity,
   TaskComment,
@@ -23,12 +24,14 @@ import {
   deleteAttachment,
   deleteComment,
   deleteTask,
+  decisionHref,
   getMe,
   getProject,
   getTask,
   getTaskByKey,
   getTaskActivity,
   getTaskComments,
+  getTaskDecisions,
   listAttachments,
   listStatuses,
   listUsers,
@@ -38,6 +41,7 @@ import {
 } from "@/lib/api";
 import { useT } from "@/lib/locale";
 import { PRIORITY_STYLES } from "@/lib/buckets";
+import { linkDecisionRefsMarkdown, splitDecisionRefs } from "@/lib/decisionRefs";
 
 const CAT_DOT: Record<string, string> = {
   BACKLOG: "#94a3b8",
@@ -71,6 +75,7 @@ export default function TaskPage() {
   const [comments, setComments] = useState<TaskComment[]>([]);
   const [activity, setActivity] = useState<TaskActivity[]>([]);
   const [attachments, setAttachments] = useState<Attachment[]>([]);
+  const [decisions, setDecisions] = useState<Decision[]>([]);
   const [comment, setComment] = useState("");
   const [editingDesc, setEditingDesc] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -87,7 +92,7 @@ export default function TaskPage() {
     try {
       const tk = isKey ? await getTaskByKey(ref) : await getTask(ref);
       setTask(tk);
-      const [p, st, us, me, cs, ac, at] = await Promise.all([
+      const [p, st, us, me, cs, ac, at, ds] = await Promise.all([
         getProject(tk.project_id),
         listStatuses(tk.project_id),
         listUsers().catch(() => [] as UserRow[]),
@@ -95,6 +100,7 @@ export default function TaskPage() {
         getTaskComments(tk.id),
         getTaskActivity(tk.id),
         listAttachments(tk.id).catch(() => [] as Attachment[]),
+        getTaskDecisions(tk.key).catch(() => [] as Decision[]),
       ]);
       setProject(p);
       setStatuses([...st].sort((a, b) => a.position - b.position));
@@ -103,6 +109,7 @@ export default function TaskPage() {
       setComments(cs);
       setActivity(ac);
       setAttachments(at);
+      setDecisions(ds);
     } catch (err) {
       if (err instanceof ApiError && err.status === 401) {
         clearTokens();
@@ -291,13 +298,34 @@ export default function TaskPage() {
                 className="min-h-[3rem] w-full cursor-text rounded-lg border border-transparent px-3 py-2 text-sm leading-relaxed hover:border-slate-200"
               >
                 {task.description ? (
-                  <Markdown text={task.description} />
+                  <Markdown text={task.description} projectCode={project?.code} />
                 ) : (
                   <span className="text-muted">{t("task.descPlaceholder")}</span>
                 )}
               </div>
             )}
           </section>
+
+          {decisions.length > 0 && (
+            <section className="mt-4">
+              <h2 className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-muted">
+                {t("decisions.tab")}
+              </h2>
+              <ul className="flex flex-col gap-1 text-sm">
+                {decisions.map((d) => (
+                  <li key={d.id} className="flex gap-2">
+                    <Link
+                      href={decisionHref(d.full_ref)}
+                      className="shrink-0 font-mono text-indigo-600 hover:underline"
+                    >
+                      {d.project_code === project?.code ? d.ref : d.full_ref}
+                    </Link>
+                    <span className="text-slate-700">{d.question}</span>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          )}
 
           <section className="mt-4">
             <h2 className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-muted">
@@ -406,7 +434,7 @@ export default function TaskPage() {
                       )}
                     </div>
                     <div className="mt-1 whitespace-pre-wrap rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700">
-                      <Linkified text={c.body} />
+                      <Linkified text={c.body} projectCode={project?.code} />
                     </div>
                   </div>
                 </div>
@@ -555,8 +583,8 @@ export default function TaskPage() {
   );
 }
 
-// Render plain text with clickable http(s) links (task descriptions & comments).
-function Linkified({ text }: { text: string }) {
+// Render plain text with clickable http(s) links and decision numbers (P-030).
+function Linkified({ text, projectCode }: { text: string; projectCode?: string }) {
   const parts = text.split(/(https?:\/\/[^\s]+)/g);
   return (
     <>
@@ -572,7 +600,17 @@ function Linkified({ text }: { text: string }) {
             {part}
           </a>
         ) : (
-          <span key={i}>{part}</span>
+          <span key={i}>
+            {splitDecisionRefs(part, projectCode).map((r, j) =>
+              r.href ? (
+                <Link key={j} href={r.href} className="text-indigo-600 underline hover:text-indigo-700">
+                  {r.text}
+                </Link>
+              ) : (
+                <span key={j}>{r.text}</span>
+              )
+            )}
+          </span>
         )
       )}
     </>
@@ -582,7 +620,7 @@ function Linkified({ text }: { text: string }) {
 // Render a task description as Markdown (headings, lists, bold, links, tables).
 // Single newlines become <br> (remark-breaks) so plain-text descriptions keep
 // their line breaks; bare URLs auto-link (remark-gfm). No raw HTML → XSS-safe.
-function Markdown({ text }: { text: string }) {
+function Markdown({ text, projectCode }: { text: string; projectCode?: string }) {
   return (
     <ReactMarkdown
       remarkPlugins={[remarkGfm, remarkBreaks]}
@@ -590,8 +628,7 @@ function Markdown({ text }: { text: string }) {
         a: ({ node, ...props }) => (
           <a
             {...props}
-            target="_blank"
-            rel="noopener noreferrer"
+            {...(props.href?.startsWith("/") ? {} : { target: "_blank", rel: "noopener noreferrer" })}
             onClick={(e) => e.stopPropagation()}
             className="break-all text-indigo-600 underline hover:text-indigo-700"
           />
@@ -622,7 +659,7 @@ function Markdown({ text }: { text: string }) {
         td: ({ node, ...props }) => <td className="border border-slate-200 px-2 py-1" {...props} />,
       }}
     >
-      {text}
+      {linkDecisionRefsMarkdown(text, projectCode)}
     </ReactMarkdown>
   );
 }

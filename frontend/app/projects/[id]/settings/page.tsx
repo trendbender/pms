@@ -245,6 +245,9 @@ export default function ProjectSettingsPage() {
               {t("leads.tab")}
             </Link>
           )}
+          <Link href={`/projects/${ref}/decisions`} className="pb-2 text-muted hover:text-ink">
+            {t("decisions.tab")}
+          </Link>
           <Link href={`/projects/${ref}/sprints`} className="pb-2 text-muted hover:text-ink">
             {t("board.sprints")}
           </Link>

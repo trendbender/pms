@@ -11,6 +11,7 @@ from app.modules.attachments.router import router as attachments_router
 from app.modules.auth.router import router as auth_router
 from app.modules.comments.router import router as comments_router
 from app.modules.dashboard.router import router as dashboard_router
+from app.modules.decisions.router import router as decisions_router
 from app.modules.finance.router import router as finance_router
 from app.modules.initiatives.router import router as initiatives_router
 from app.modules.leads.router import router as leads_router
@@ -54,6 +55,7 @@ app.include_router(sprints_router)
 app.include_router(dashboard_router)
 app.include_router(finance_router)
 app.include_router(leads_router)
+app.include_router(decisions_router)
 app.include_router(notifications_router)
 app.include_router(search_router)
 

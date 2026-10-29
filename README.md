@@ -15,7 +15,14 @@ Projects that sell can switch on **leads**: a per-project sales funnel with its 
 stages and fields, fed by website forms and partner sites through an ingest key,
 plus **contracts and payments** to see what's invoiced and what's due.
 
+Each project can carry a **roadmap**: the period agreed with the client, its
+waves, the baseline → target → current table and the published report — rendered
+from the board rather than written beside it.
+
 **License:** MIT · **Stack:** FastAPI · PostgreSQL · Redis · Next.js · TypeScript
+
+**The long version:** [docs/PRODUCT.md](docs/PRODUCT.md) — who it's for, the
+problem it solves, the domain decisions, and what it deliberately is not.
 
 > Not another Jira. Minimal moving parts, clear ownership, a visible flow, short
 > feedback loops. Everything runs from one `docker compose up`.
@@ -35,6 +42,12 @@ plus **contracts and payments** to see what's invoiced and what's due.
 - **Sprints & initiatives** — short sprints with goals and stats, start/complete
   flow (unfinished tasks roll to the next sprint or the backlog), initiatives to
   group tasks with progress rollup, a prioritized backlog.
+- **Roadmaps** — the period agreed with the client, the waves inside it, a
+  baseline → target → current table and links to the plan and the published
+  report. Plan items stay ordinary tasks and waves are initiatives, so progress
+  and blockers are read off the board; `pms.py roadmap report` renders the whole
+  thing as a client-ready HTML page, so the end-of-period review can't disagree
+  with the tracker.
 - **Dashboards** — Portfolio (per-project health + open/overdue/blocked/review
   counters + active sprint), My Tasks, My Reviews, cross-project All Tasks with
   filters and pagination, per-project dashboard.
@@ -189,6 +202,13 @@ pms.py status ABC-12 "In Progress"
 pms.py comment ABC-12 "deployed, waiting for review"
 pms.py done ABC-12
 
+# the roadmap of a period, and the client-ready report rendered from it
+pms.py roadmap add --project ABC --title "Month 1" --start 2026-11-01 --end 2026-11-30 \
+  --scope "14 items agreed with the client on 27.10" --status ACTIVE
+pms.py roadmap wave-add --project ABC --name "Week 1" --due 2026-11-07 --tasks ABC-12,ABC-13
+pms.py roadmap metric-add --project ABC --name canonical --baseline "0 of 165" --target "165 of 165"
+pms.py roadmap report --project ABC
+
 # leads, for projects that have them switched on
 pms.py lead enable --project ABC --preset sales
 pms.py lead add --project ABC --title "Acme: SEO audit" --source website --amount 1500
@@ -213,7 +233,8 @@ Point it at your instance and give it a service account via a small JSON config
 
 Core Scrumban (board, tasks, sprints, initiatives, dashboards, notifications,
 search, i18n), money (contracts, payments) and leads with funnels are
-implemented, plus daily database backups. On the list next: project hierarchy
+implemented, as are per-project roadmaps with their metrics and report, plus
+daily database backups. On the list next: project hierarchy
 (sub-projects under one parent), moving tasks between projects,
 object-storage-backed attachments and email delivery for invitations and
 notifications. See [CHANGELOG.md](CHANGELOG.md).

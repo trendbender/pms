@@ -14,7 +14,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import Text, cast, delete, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.database import get_db
+from app.core.database import DbSession
 from app.core.deps import get_current_user, get_workspace_id, load_project
 from app.models.decision import Decision
 from app.models.project import Project
@@ -146,7 +146,7 @@ async def sync_decisions(
     body: DecisionsSync,
     user: User = Depends(get_current_user),
     workspace_id: UUID = Depends(get_workspace_id),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = DbSession,
 ) -> DecisionsSyncOut:
     """Принять реестры из вики целиком: каждый присланный реестр заменяет свою
     копию (новые записи создаются, изменённые обновляются, пропавшие удаляются).
@@ -250,7 +250,7 @@ async def list_project_decisions(
     q: str | None = Query(default=None, max_length=200),
     status_: str | None = Query(default=None, alias="status", max_length=20),
     area: str | None = Query(default=None, max_length=40),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = DbSession,
 ) -> list[DecisionOut]:
     stmt = _filter(select(Decision).where(Decision.project_id == project.id), q, status_, area)
     return [_out(d, project.code) for d in (await db.scalars(stmt)).all()]
@@ -263,7 +263,7 @@ async def list_global_decisions(
     area: str | None = Query(default=None, max_length=40),
     user: User = Depends(get_current_user),
     workspace_id: UUID = Depends(get_workspace_id),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = DbSession,
 ) -> list[DecisionOut]:
     if not await perms.has_workspace_permission(db, user.id, workspace_id, Perm.WORKSPACE_MANAGE):
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Not found")
@@ -311,7 +311,7 @@ async def get_decision(
     full_ref: str,
     user: User = Depends(get_current_user),
     workspace_id: UUID = Depends(get_workspace_id),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = DbSession,
 ) -> DecisionDetail:
     """Решение по ссылке `/d/<префикс>-<номер>`: префикс это код проекта PMS
     (`SSK`), имя реестра в вике (`skolkoskolko`) или `G` для `_global`."""
@@ -351,7 +351,7 @@ async def decisions_for_task(
     key: str,
     user: User = Depends(get_current_user),
     workspace_id: UUID = Depends(get_workspace_id),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = DbSession,
 ) -> list[DecisionOut]:
     """Решения, которые ссылаются на задачу (поле `tasks` или ссылка в `source`)."""
     rows = (

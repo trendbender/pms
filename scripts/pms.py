@@ -12,7 +12,8 @@ The access token is cached under ~/.cache and refreshed automatically.
 
 Examples:
     pms.py projects
-    pms.py project-add --code AXM --name "Axiom Charter" --group "Клиентские"
+    pms.py project-add --code AXM --name "Axiom Charter" --group "Клиентские" --site axiom.ru
+    pms.py project-edit SSK --site https://skolkoskolko.ru   # пути /lk/… в задачах → ссылки на сайт
     pms.py list --project ABC
     pms.py show ABC-26
     pms.py add --project ABC --title "Check the forms" --priority HIGH
@@ -435,7 +436,8 @@ def cmd_projects(client, args):
     ps = client.call("GET", "/projects?include_archived=true" if args.archived else "/projects")
     ps.sort(key=lambda p: (p.get("group_name") or "", p["code"]))
     out(ps, args.json, lambda ps: [
-        print(f"{p['code']:<6} {p['name']}  ·  {p.get('group_name') or '—'}  [{p['status']}/{p['health']}]")
+        print(f"{p['code']:<6} {p['name']}  ·  {p.get('group_name') or '—'}  [{p['status']}/{p['health']}]"
+              + (f"  {p['site_url']}" if p.get("site_url") else ""))
         for p in ps
     ])
 
@@ -447,6 +449,8 @@ def cmd_project_add(client, args):
         body["group_name"] = args.group
     if args.goal:
         body["goal"] = args.goal
+    if args.site:
+        body["site_url"] = args.site
     p = client.call("POST", "/projects", body)
 
     def human(p):
@@ -454,6 +458,24 @@ def cmd_project_add(client, args):
         print(f"{client.web_base}/projects/{p['code'].lower()}")
 
     out(p, args.json, human)
+
+
+def cmd_project_edit(client, args):
+    """Поменять поля проекта. Сайт (--site) нужен для ссылок: путь «/lk/…» в задаче
+    или комментарии PMS сохраняет абсолютным URL на этот сайт; --site none — снять."""
+    project = resolve_project(client, args.code)
+    body = {}
+    if args.site is not None:
+        body["site_url"] = "" if args.site.lower() in ("none", "-") else args.site
+    if args.name:
+        body["name"] = args.name
+    if args.group:
+        body["group_name"] = args.group
+    if not body:
+        sys.exit("нечего менять: --site / --name / --group")
+    p = client.call("PATCH", f"/projects/{project['id']}", body)
+    out(p, args.json, lambda p: print(
+        f"{p['code']} — {p['name']} · {p.get('group_name') or '—'} · сайт: {p.get('site_url') or '—'}"))
 
 
 def cmd_list(client, args):
@@ -536,9 +558,36 @@ def cmd_show(client, args):
             print(f"  · {users.get(c.get('author_id'),'?')}: {c['body']}")
 
 
+BRIEFS = "/srv/projects/seo-engine/briefs.py"
+AI_PROVIDERS = ("antigravity", "chatgpt", "claude-reviewer", "opencode")
+
+
+def brief_provider(assignee):
+    a = (assignee or "").strip().lower().split("@")[0]
+    return next((p for p in AI_PROVIDERS if a == p or a.startswith(p)), "any")
+
+
+def render_brief(args):
+    """Описание задачи из хранимого шаблона ТЗ (seo-engine/briefs): шаблон + блоки + уроки провайдера, --desc дописывается."""
+    import subprocess
+    cmd = ["python3", BRIEFS, "render", args.brief, "--provider", brief_provider(args.assignee),
+           "--param", f"title={args.title}"] + [x for p in (args.param or []) for x in ("--param", p)]
+    r = subprocess.run(cmd, capture_output=True, text=True)
+    if r.returncode != 0:
+        sys.exit(f"briefs.py render {args.brief}: {r.stderr.strip() or r.stdout.strip()}")
+    if r.stderr.strip():
+        print(r.stderr.strip(), file=sys.stderr)
+    return r.stdout + (f"\n## Дополнительно к шаблону\n\n{args.desc}\n" if args.desc else "")
+
+
 def cmd_add(client, args):
     project = resolve_project(client, args.project)
     body = {"project_id": project["id"], "title": args.title}
+    if args.brief:
+        args.desc = render_brief(args)
+    elif brief_provider(args.assignee) != "any":
+        print(f"ВНИМАНИЕ: задача ИИ-исполнителю без шаблона ТЗ. Шаблоны: python3 {BRIEFS} list, "
+              f"постановка: --brief ШАБЛОН --param k=v (канон conventions/ai-briefs.md)", file=sys.stderr)
     if args.desc:
         body["description"] = args.desc
     if args.priority:
@@ -552,6 +601,13 @@ def cmd_add(client, args):
         user = resolve_user(client, args.assignee)
         client.call("PATCH", f"/tasks/{task['id']}", {"assignee_id": user["id"]})
     attached = [client.upload(task["id"], fp) for fp in (args.attach or [])]
+    if args.brief:
+        import subprocess
+        d = next((p.split("=", 1)[1] for p in (args.param or []) if p.startswith("dir=")), "")
+        r = subprocess.run(["python3", BRIEFS, "use", args.brief, "--task", task["key"],
+                            "--provider", brief_provider(args.assignee), "--dir", d], capture_output=True, text=True)
+        if r.returncode != 0:
+            print(f"ВНИМАНИЕ: применение шаблона не записано: {r.stderr.strip()}", file=sys.stderr)
 
     def human(t):
         print(f"создана {t['key']}: {t['title']}")
@@ -1167,12 +1223,31 @@ def cmd_lead_ingest(_client, args):
         f"{'создан' if r['created'] else 'уже был'} {r['key']} [{r['stage_name']}]\n{r['url']}"))
 
 
+def cmd_decisions_sync(client, args):
+    """Залить копию реестра решений из вики (decisions.py pms-export). KL-226."""
+    body = json.loads(Path(args.json_file).read_text()) if args.json_file != "-" else json.load(sys.stdin)
+    r = client.call("PUT", "/decisions/sync", body)
+
+    def show(r):
+        for x in r["registries"]:
+            if x.get("skipped"):
+                print(f"{x['registry']:24} пропущен: {x['skipped']}")
+            elif x["created"] or x["updated"] or x["deleted"]:
+                print(f"{x['registry']:24} {x['total']:4}  +{x['created']} ~{x['updated']} -{x['deleted']}")
+        print("реестров:", len(r["registries"]), "· записей:", sum(x["total"] for x in r["registries"]))
+
+    out(r, args.json, show)
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="pms.py", description="PMS task control CLI")
     p.add_argument("--json", action="store_true", help="machine-readable JSON output")
     sub = p.add_subparsers(dest="cmd", required=True)
 
     sub.add_parser("whoami").set_defaults(fn=cmd_whoami)
+    sp = sub.add_parser("decisions-sync", help="залить копию реестра решений (JSON-файл или - для stdin)")
+    sp.add_argument("json_file")
+    sp.set_defaults(fn=cmd_decisions_sync)
     sp = sub.add_parser("projects", help="list projects")
     sp.add_argument("--archived", action="store_true", help="include archived projects")
     sp.set_defaults(fn=cmd_projects)
@@ -1183,7 +1258,15 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--name", required=True)
     sp.add_argument("--group", help="portfolio group, e.g. Клиентские")
     sp.add_argument("--goal")
+    sp.add_argument("--site", help="сайт проекта (https://example.ru): пути /lk/… в задачах станут ссылками")
     sp.set_defaults(fn=cmd_project_add)
+
+    sp = sub.add_parser("project-edit", help="поменять поля проекта (сайт, название, группа)")
+    sp.add_argument("code")
+    sp.add_argument("--site", help="https://example.ru; none — снять")
+    sp.add_argument("--name")
+    sp.add_argument("--group")
+    sp.set_defaults(fn=cmd_project_edit)
 
     sp = sub.add_parser("list", help="list tasks in a project")
     sp.add_argument("--project", required=True)
@@ -1209,6 +1292,9 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--assignee", help="email or name")
     sp.add_argument("--attach", action="append", metavar="FILE",
                     help="прикрепить файл к задаче (можно повторять), напр. скриншот")
+    sp.add_argument("--brief", metavar="TEMPLATE",
+                    help="ТЗ из хранимого шаблона seo-engine/briefs (briefs.py list): описание = шаблон + --desc")
+    sp.add_argument("--param", action="append", metavar="K=V", help="параметр шаблона --brief (можно повторять)")
     sp.set_defaults(fn=cmd_add)
 
     sp = sub.add_parser("edit", help="update title/description/priority/due of an existing task")

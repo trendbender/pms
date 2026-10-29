@@ -15,9 +15,11 @@ export function NavGate() {
     | "myReviews"
     | "allTasks"
     | "projects"
+    | "roadmap"
     | "users"
     | undefined;
   if (path.startsWith("/dashboard")) active = "dashboard";
+  else if (path === "/roadmap") active = "roadmap";
   else if (path.startsWith("/my-tasks")) active = "myTasks";
   else if (path.startsWith("/my-reviews")) active = "myReviews";
   else if (path.startsWith("/all-tasks")) active = "allTasks";

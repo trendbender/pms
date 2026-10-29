@@ -43,6 +43,29 @@ project expired by the savepoint rollback).
   `asyncio.gather`, each on its own connection): leads, tasks, ingest without
   and with the same `external_id`. All 4 were red before the fix, green 5/5 runs after.
 
+## 0.4.0 — 2026-10-21
+
+**Decision log**, a read-only copy of the per-project decision registries.
+
+- The registries stay where they are edited (YAML files with their own CLI and
+  git history); PMS receives the whole set via `PUT /decisions/sync` (workspace
+  admins only) and replaces each registry it is sent: new records are created,
+  changed ones updated, missing ones deleted. Table `decisions` (migration
+  `e5f6a7b8c9d0`).
+- Every decision has a short link `/d/<project code>-<id>` (`/d/ssk-p-030`);
+  cross-project rules live in the `_global` registry under prefix `G`
+  (`/d/g-p-022`) and are visible to workspace owners and admins only. Project
+  decisions follow project visibility.
+- A **Decisions** tab on every project (search, status and area filters, open
+  questions on top) and a cross-project page `/decisions`.
+- Decision numbers in task descriptions and comments become links: `P-030` for
+  the task's own project, `SSK:P-030` or `_global:P-022` for another registry.
+  Task keys (`SSK-203`) are not touched.
+- Task keys mentioned in a decision (its `tasks` list or links in `source`) are
+  shown on the decision page with their status, and the task page lists the
+  decisions that reference it (`GET /decisions/by-task/{key}`).
+- Tests `tests/test_decisions.py` (sync, re-sync, refs, visibility).
+
 ## 0.3.0 — 2026-10-18
 
 **Leads & funnels**, opt-in per project.

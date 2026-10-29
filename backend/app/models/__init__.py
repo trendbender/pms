@@ -10,6 +10,7 @@ from app.models.initiative import Initiative
 from app.models.lead import Lead, LeadEvent, LeadField, LeadIngestToken, LeadStage
 from app.models.notification import Notification
 from app.models.project import Project, ProjectMember
+from app.models.roadmap import Roadmap, RoadmapMetric
 from app.models.sprint import Sprint
 from app.models.task import Task, TaskStatus, TaskType
 from app.models.user import User
@@ -23,6 +24,8 @@ __all__ = [
     "Project",
     "ProjectMember",
     "Initiative",
+    "Roadmap",
+    "RoadmapMetric",
     "Sprint",
     "Task",
     "TaskType",

@@ -896,3 +896,95 @@ export const getTaskDecisions = (key: string) =>
 
 // Короткая ссылка на решение: /d/ssk-p-030, у _global префикс G (/d/g-p-022)
 export const decisionHref = (fullRef: string) => `/d/${fullRef.toLowerCase()}`;
+
+// ---- Роадмапы ------------------------------------------------------------
+// Роадмап это обёртка вокруг задач: период, согласование с клиентом, метрики
+// «было → цель → стало» и ссылка на отчёт. Прогресс считается на бэкенде по
+// задачам волн, поэтому страница ничего не пересчитывает сама.
+
+export interface Roadmap {
+  id: string;
+  project_id: string;
+  project_code: string | null;
+  project_name: string | null;
+  title: string;
+  period_start: string;
+  period_end: string | null;
+  status: "DRAFT" | "AGREED" | "ACTIVE" | "COMPLETED" | "CANCELLED" | string;
+  goal: string | null;
+  scope_note: string | null;
+  agreed_on: string | null;
+  decision_ref: string | null;
+  plan_url: string | null;
+  report_url: string | null;
+  archived_at: string | null;
+  created_at: string;
+  wave_count: number;
+  task_count: number;
+  done_count: number;
+  blocked_count: number;
+  overdue_count: number;
+  metric_count: number;
+  metric_reached_count: number;
+}
+
+export interface RoadmapMetric {
+  id: string;
+  roadmap_id: string;
+  name: string;
+  baseline: string | null;
+  baseline_on: string | null;
+  target: string | null;
+  current: string | null;
+  measured_on: string | null;
+  source: string | null;
+  reached_on: string | null;
+  position: number;
+}
+
+export interface RoadmapTask {
+  id: string;
+  key: string;
+  title: string;
+  status_name: string | null;
+  status_category: string | null;
+  priority: string;
+  assignee_name: string | null;
+  due_at: string | null;
+  completed_at: string | null;
+  is_blocked: boolean;
+  blocked_reason: string | null;
+}
+
+export interface RoadmapWave {
+  id: string;
+  name: string;
+  description: string | null;
+  due_date: string | null;
+  task_count: number;
+  done_count: number;
+  tasks: RoadmapTask[];
+}
+
+export interface RoadmapOpenDecision {
+  ref: string;
+  registry: string;
+  area_title: string | null;
+  question: string;
+}
+
+export interface RoadmapDetail extends Roadmap {
+  waves: RoadmapWave[];
+  metrics: RoadmapMetric[];
+  waiting: RoadmapTask[];
+  open_decisions: RoadmapOpenDecision[];
+}
+
+export const listProjectRoadmaps = (projectId: string, includeArchived = false) =>
+  api<Roadmap[]>(
+    `/projects/${projectId}/roadmaps${includeArchived ? "?include_archived=true" : ""}`
+  );
+export const getProjectRoadmap = (projectId: string) =>
+  api<RoadmapDetail>(`/projects/${projectId}/roadmap`);
+export const getRoadmap = (id: string) => api<RoadmapDetail>(`/roadmaps/${id}`);
+export const listPortfolioRoadmaps = () => api<Roadmap[]>("/roadmap");

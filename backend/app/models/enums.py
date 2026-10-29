@@ -95,6 +95,16 @@ class LeadFieldType(StrEnum):
     URL = "url"
 
 
+class RoadmapStatus(StrEnum):
+    """Жизнь роадмапа: черновик → согласован с клиентом → в работе → закрыт отчётом."""
+
+    DRAFT = "DRAFT"
+    AGREED = "AGREED"
+    ACTIVE = "ACTIVE"
+    COMPLETED = "COMPLETED"
+    CANCELLED = "CANCELLED"
+
+
 class SprintStatus(StrEnum):
     PLANNED = "PLANNED"
     ACTIVE = "ACTIVE"

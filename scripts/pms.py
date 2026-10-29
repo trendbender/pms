@@ -12,7 +12,8 @@ The access token is cached under ~/.cache and refreshed automatically.
 
 Examples:
     pms.py projects
-    pms.py project-add --code AXM --name "Axiom Charter" --group "Клиентские"
+    pms.py project-add --code AXM --name "Axiom Charter" --group "Клиентские" --site axiom.ru
+    pms.py project-edit SSK --site https://skolkoskolko.ru   # пути /lk/… в задачах → ссылки на сайт
     pms.py list --project ABC
     pms.py show ABC-26
     pms.py add --project ABC --title "Check the forms" --priority HIGH
@@ -44,6 +45,7 @@ import argparse
 import datetime as _dt
 from decimal import Decimal
 import json
+import html
 import mimetypes
 import os
 import re
@@ -435,7 +437,8 @@ def cmd_projects(client, args):
     ps = client.call("GET", "/projects?include_archived=true" if args.archived else "/projects")
     ps.sort(key=lambda p: (p.get("group_name") or "", p["code"]))
     out(ps, args.json, lambda ps: [
-        print(f"{p['code']:<6} {p['name']}  ·  {p.get('group_name') or '—'}  [{p['status']}/{p['health']}]")
+        print(f"{p['code']:<6} {p['name']}  ·  {p.get('group_name') or '—'}  [{p['status']}/{p['health']}]"
+              + (f"  {p['site_url']}" if p.get("site_url") else ""))
         for p in ps
     ])
 
@@ -447,6 +450,8 @@ def cmd_project_add(client, args):
         body["group_name"] = args.group
     if args.goal:
         body["goal"] = args.goal
+    if args.site:
+        body["site_url"] = args.site
     p = client.call("POST", "/projects", body)
 
     def human(p):
@@ -454,6 +459,24 @@ def cmd_project_add(client, args):
         print(f"{client.web_base}/projects/{p['code'].lower()}")
 
     out(p, args.json, human)
+
+
+def cmd_project_edit(client, args):
+    """Поменять поля проекта. Сайт (--site) нужен для ссылок: путь «/lk/…» в задаче
+    или комментарии PMS сохраняет абсолютным URL на этот сайт; --site none — снять."""
+    project = resolve_project(client, args.code)
+    body = {}
+    if args.site is not None:
+        body["site_url"] = "" if args.site.lower() in ("none", "-") else args.site
+    if args.name:
+        body["name"] = args.name
+    if args.group:
+        body["group_name"] = args.group
+    if not body:
+        sys.exit("нечего менять: --site / --name / --group")
+    p = client.call("PATCH", f"/projects/{project['id']}", body)
+    out(p, args.json, lambda p: print(
+        f"{p['code']} — {p['name']} · {p.get('group_name') or '—'} · сайт: {p.get('site_url') or '—'}"))
 
 
 def cmd_list(client, args):
@@ -536,9 +559,36 @@ def cmd_show(client, args):
             print(f"  · {users.get(c.get('author_id'),'?')}: {c['body']}")
 
 
+BRIEFS = "/srv/projects/seo-engine/briefs.py"
+AI_PROVIDERS = ("antigravity", "chatgpt", "claude-reviewer", "opencode")
+
+
+def brief_provider(assignee):
+    a = (assignee or "").strip().lower().split("@")[0]
+    return next((p for p in AI_PROVIDERS if a == p or a.startswith(p)), "any")
+
+
+def render_brief(args):
+    """Описание задачи из хранимого шаблона ТЗ (seo-engine/briefs): шаблон + блоки + уроки провайдера, --desc дописывается."""
+    import subprocess
+    cmd = ["python3", BRIEFS, "render", args.brief, "--provider", brief_provider(args.assignee),
+           "--param", f"title={args.title}"] + [x for p in (args.param or []) for x in ("--param", p)]
+    r = subprocess.run(cmd, capture_output=True, text=True)
+    if r.returncode != 0:
+        sys.exit(f"briefs.py render {args.brief}: {r.stderr.strip() or r.stdout.strip()}")
+    if r.stderr.strip():
+        print(r.stderr.strip(), file=sys.stderr)
+    return r.stdout + (f"\n## Дополнительно к шаблону\n\n{args.desc}\n" if args.desc else "")
+
+
 def cmd_add(client, args):
     project = resolve_project(client, args.project)
     body = {"project_id": project["id"], "title": args.title}
+    if args.brief:
+        args.desc = render_brief(args)
+    elif brief_provider(args.assignee) != "any":
+        print(f"ВНИМАНИЕ: задача ИИ-исполнителю без шаблона ТЗ. Шаблоны: python3 {BRIEFS} list, "
+              f"постановка: --brief ШАБЛОН --param k=v (канон conventions/ai-briefs.md)", file=sys.stderr)
     if args.desc:
         body["description"] = args.desc
     if args.priority:
@@ -552,6 +602,13 @@ def cmd_add(client, args):
         user = resolve_user(client, args.assignee)
         client.call("PATCH", f"/tasks/{task['id']}", {"assignee_id": user["id"]})
     attached = [client.upload(task["id"], fp) for fp in (args.attach or [])]
+    if args.brief:
+        import subprocess
+        d = next((p.split("=", 1)[1] for p in (args.param or []) if p.startswith("dir=")), "")
+        r = subprocess.run(["python3", BRIEFS, "use", args.brief, "--task", task["key"],
+                            "--provider", brief_provider(args.assignee), "--dir", d], capture_output=True, text=True)
+        if r.returncode != 0:
+            print(f"ВНИМАНИЕ: применение шаблона не записано: {r.stderr.strip()}", file=sys.stderr)
 
     def human(t):
         print(f"создана {t['key']}: {t['title']}")
@@ -612,8 +669,16 @@ def cmd_status(client, args):
     st = pick_status(statuses, args.status)
     if st is None:
         die(f"status not found: {args.status} (available: {', '.join(s['name'] for s in statuses)})")
-    t = client.call("PATCH", f"/tasks/{task['id']}/status", {"status_id": st["id"]})
-    out(t, args.json, lambda t: print(f"{t['key']} → {t.get('status_name')}\n{client.task_url(t['key'])}"))
+    body = {"status_id": st["id"]}
+    # Правило 8: блокировка видна с причиной, иначе в роадмапе стоит пункт без объяснения.
+    if st["category"] == "BLOCKED":
+        if not args.reason:
+            die("статус категории BLOCKED требует --reason: что именно держит задачу")
+        body["reason"] = args.reason
+    t = client.call("PATCH", f"/tasks/{task['id']}/status", body)
+    out(t, args.json, lambda t: print(f"{t['key']} → {t.get('status_name')}"
+        + (f" ({t['blocked_reason']})" if t.get("blocked_reason") else "")
+        + f"\n{client.task_url(t['key'])}"))
 
 
 def cmd_done(client, args):
@@ -944,6 +1009,410 @@ def _lead_line(ld: dict) -> str:
     return f"{ld['key']:<10} [{ld['stage_name']:<18}] {ld['source']:<8}{amount}{who}  {ld['title']}"
 
 
+# ---- roadmap: роадмап проекта -------------------------------------------- #
+
+_RM_STATUS_RU = {
+    "DRAFT": "черновик",
+    "AGREED": "согласован",
+    "ACTIVE": "в работе",
+    "COMPLETED": "закрыт",
+    "CANCELLED": "отменён",
+}
+
+
+def _roadmap_call(client, method, path, body=None):
+    """Модуль роадмапов может быть ещё не выкачен: 404 объясняем словами."""
+    try:
+        return client.call(method, path, body)
+    except ApiError as e:
+        if e.status == 404 and "roadmap" in path:
+            die("модуль роадмапов не отвечает на этом инстансе PMS (не выкачен на прод?)")
+        raise
+
+
+def _roadmap_of(client, args):
+    """Роадмап по --id или текущий роадмап проекта (--project)."""
+    if getattr(args, "id", None):
+        return _roadmap_call(client, "GET", f"/roadmaps/{args.id}")
+    if not getattr(args, "project", None):
+        die("нужен --project CODE или --id роадмапа")
+    project = resolve_project(client, args.project)
+    try:
+        return client.call("GET", f"/projects/{project['id']}/roadmap")
+    except ApiError as e:
+        if e.status == 404:
+            die(f"у проекта {project['code']} нет роадмапа: pms.py roadmap add --project "
+                f"{project['code']} --title \"Месяц 1\" --start 2026-11-01")
+        raise
+
+
+def _rm_period(r) -> str:
+    start = _rm_day(r["period_start"])
+    return f"{start} - {_rm_day(r['period_end'])}" if r.get("period_end") else f"с {start}"
+
+
+def _rm_day(value) -> str:
+    if not value:
+        return "—"
+    d = str(value)[:10].split("-")
+    return f"{d[2]}.{d[1]}.{d[0]}" if len(d) == 3 else str(value)
+
+
+def _rm_body(args, *, creating: bool) -> dict:
+    body = {}
+    if getattr(args, "title", None):
+        body["title"] = args.title
+    if getattr(args, "start", None):
+        body["period_start"] = _due_date_only(args.start)
+    if getattr(args, "end", None):
+        body["period_end"] = _due_date_only(args.end)
+    if getattr(args, "status", None):
+        body["status"] = args.status
+    for field, attr in (
+        ("goal", "goal"),
+        ("scope_note", "scope"),
+        ("decision_ref", "decision"),
+        ("plan_url", "plan_url"),
+        ("report_url", "report_url"),
+    ):
+        value = getattr(args, attr, None)
+        if value is not None:
+            body[field] = "" if value.lower() in ("none", "-") else value
+    if getattr(args, "agreed", None):
+        body["agreed_on"] = _due_date_only(args.agreed)
+    if creating and not body.get("period_start"):
+        die("нужен --start: роадмап без периода не роадмап")
+    return body
+
+
+def cmd_roadmap_list(client, args):
+    if args.project:
+        project = resolve_project(client, args.project)
+        path = f"/projects/{project['id']}/roadmaps"
+        if args.archived:
+            path += "?include_archived=true"
+        rows = _roadmap_call(client, "GET", path)
+    else:
+        rows = _roadmap_call(client, "GET", "/roadmap")
+    if args.json:
+        out(rows, True, None)
+        return
+    if not rows:
+        print("роадмапов нет")
+        return
+    for r in rows:
+        done = f"{r['done_count']}/{r['task_count']}"
+        tail = f" · метрики {r['metric_reached_count']}/{r['metric_count']}" if r["metric_count"] else ""
+        print(f"{(r.get('project_code') or '—'):<6} {_rm_period(r):<23} {r['title']}  "
+              f"[{_RM_STATUS_RU.get(r['status'], r['status'])}] пункты {done}{tail}")
+
+
+def cmd_roadmap_show(client, args):
+    r = _roadmap_of(client, args)
+    if args.json:
+        out(r, True, None)
+        return
+    print(f"{r['title']} — {r.get('project_name') or ''} ({r.get('project_code') or '—'})")
+    print(f"{_rm_period(r)} · {_RM_STATUS_RU.get(r['status'], r['status'])} · "
+          f"пункты {r['done_count']}/{r['task_count']}"
+          + (f", просрочено {r['overdue_count']}" if r["overdue_count"] else "")
+          + (f", заблокировано {r['blocked_count']}" if r["blocked_count"] else ""))
+    if r.get("goal"):
+        print(f"Цель: {r['goal']}")
+    if r.get("scope_note"):
+        print(f"Согласовано: {r['scope_note']}")
+    if r.get("report_url"):
+        print(f"Отчёт: {r['report_url']}")
+    for wave in r.get("waves", []):
+        print(f"\n— {wave['name']} · до {_rm_day(wave.get('due_date'))} · "
+              f"{wave['done_count']}/{wave['task_count']} —")
+        for t in wave.get("tasks", []):
+            mark = "✓" if t["status_category"] == "DONE" else ("!" if t["is_blocked"] else " ")
+            who = f" · {t['assignee_name']}" if t.get("assignee_name") else ""
+            print(f"  {mark} {t['key']:<9} {t['title']}{who} · {_rm_day(t.get('due_at'))}")
+    if r.get("metrics"):
+        print("\n— было → цель → сейчас —")
+        for m in r["metrics"]:
+            mark = "✓" if m.get("reached_on") else " "
+            print(f"  {mark} {m['name']}: {m.get('baseline') or '—'} → {m.get('target') or '—'}"
+                  f" → {m.get('current') or 'пока нет'}  [{m['id'][:8]}]")
+    if r.get("waiting") or r.get("open_decisions"):
+        print("\n— держит роадмап —")
+        for t in r.get("waiting", []):
+            print(f"  ! {t['key']} {t['title']}: {t.get('blocked_reason') or 'без причины'}")
+        for d in r.get("open_decisions", []):
+            print(f"  ? {d['ref']} {d['question']}")
+
+
+def cmd_roadmap_add(client, args):
+    project = resolve_project(client, args.project)
+    body = _rm_body(args, creating=True)
+    r = _roadmap_call(client, "POST", f"/projects/{project['id']}/roadmaps", body)
+    print(f"создан роадмап {r['title']} ({_rm_period(r)}) для {project['code']}")
+    print(f"{client.web_base}/projects/{project['code'].lower()}/roadmap")
+
+
+def cmd_roadmap_edit(client, args):
+    r = _roadmap_of(client, args)
+    if args.archive:
+        _roadmap_call(client, "POST", f"/roadmaps/{r['id']}/archive")
+        print(f"роадмап {r['title']} в архиве")
+        return
+    body = _rm_body(args, creating=False)
+    if not body:
+        die("нечего менять")
+    r = _roadmap_call(client, "PATCH", f"/roadmaps/{r['id']}", body)
+    print(f"{r['title']} · {_rm_period(r)} · {_RM_STATUS_RU.get(r['status'], r['status'])}")
+
+
+def cmd_roadmap_wave_add(client, args):
+    r = _roadmap_of(client, args)
+    body = {"name": args.name, "roadmap_id": r["id"]}
+    if args.due:
+        body["due_date"] = _due_date_only(args.due)
+    if args.desc:
+        body["description"] = args.desc
+    wave = client.call("POST", f"/projects/{r['project_id']}/initiatives", body)
+    print(f"волна «{wave['name']}» в роадмапе {r['title']}")
+    for key in [k.strip() for k in (args.tasks or "").split(",") if k.strip()]:
+        task = resolve_task(client, key)
+        client.call("PATCH", f"/tasks/{task['id']}", {"initiative_id": wave["id"]})
+        print(f"  + {task['key']} {task['title']}")
+
+
+def cmd_roadmap_metric_add(client, args):
+    r = _roadmap_of(client, args)
+    body = {"name": args.name}
+    for field, attr in (
+        ("baseline", "baseline"),
+        ("target", "target"),
+        ("current", "current"),
+        ("source", "source"),
+    ):
+        if getattr(args, attr, None):
+            body[field] = getattr(args, attr)
+    for field, attr in (
+        ("baseline_on", "baseline_on"),
+        ("measured_on", "measured_on"),
+        ("reached_on", "reached_on"),
+    ):
+        if getattr(args, attr, None):
+            body[field] = _due_date_only(getattr(args, attr))
+    m = _roadmap_call(client, "POST", f"/roadmaps/{r['id']}/metrics", body)
+    print(f"метрика {m['name']}: {m.get('baseline') or '—'} → {m.get('target') or '—'}  [{m['id']}]")
+
+
+def cmd_roadmap_metric_set(client, args):
+    body = {}
+    for field, attr in (
+        ("current", "current"),
+        ("baseline", "baseline"),
+        ("target", "target"),
+        ("source", "source"),
+        ("name", "name"),
+    ):
+        if getattr(args, attr, None):
+            body[field] = getattr(args, attr)
+    for field, attr in (
+        ("measured_on", "measured_on"),
+        ("reached_on", "reached_on"),
+        ("baseline_on", "baseline_on"),
+    ):
+        if getattr(args, attr, None):
+            body[field] = _due_date_only(getattr(args, attr))
+    if not body:
+        die("нечего менять: --current / --target / --reached-on …")
+    m = _roadmap_call(client, "PATCH", f"/roadmap-metrics/{args.metric}", body)
+    print(f"{m['name']}: {m.get('baseline') or '—'} → {m.get('target') or '—'} → "
+          f"{m.get('current') or 'пока нет'}"
+          + (f" ✓ {_rm_day(m['reached_on'])}" if m.get("reached_on") else ""))
+
+
+_RM_CSS = """
+  body{background:#fff;color:#1d2330;font:15px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif;margin:0;padding:24px 16px}
+  main{max-width:1060px;margin:0 auto}
+  h1{font-size:24px;margin:0 0 4px}
+  h2{font-size:18px;margin:32px 0 10px;padding-top:12px;border-top:1px solid #e3e6ec}
+  .sub{color:#5b6475;margin:0 0 18px}
+  table{border-collapse:collapse;width:100%;margin:8px 0 4px;font-size:14px}
+  th,td{border:1px solid #e3e6ec;padding:6px 8px;text-align:left;vertical-align:top}
+  th{background:#f5f7fa;font-weight:600}
+  .wrap{overflow-x:auto}
+  a{color:#1f5fbf}
+  .tag{display:inline-block;font-size:12px;padding:1px 7px;border-radius:10px;margin:1px 2px 1px 0;white-space:nowrap}
+  .done{background:#e6f6ec;color:#1e6b3a}.work{background:#e8f0fe;color:#1a4a9c}
+  .block{background:#fde8e8;color:#9b1c1c}.wait{background:#eef0f3;color:#3b4252}
+  .tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:10px;margin:12px 0}
+  .tile{border:1px solid #e3e6ec;border-radius:8px;padding:10px 12px}
+  .tile b{display:block;font-size:20px}
+  .tile span{color:#5b6475;font-size:13px}
+  ul{margin:6px 0 6px 20px;padding:0}
+  .note{background:#f7f8fa;border-left:3px solid #9aa4b5;padding:8px 12px;margin:10px 0}
+  .foot{color:#5b6475;font-size:13px;margin-top:28px}
+"""
+
+
+def _rm_esc(value) -> str:
+    return html.escape(str(value or ""), quote=True)
+
+
+def _rm_task_row(client, t) -> str:
+    """Строка пункта плана: ключ ссылкой, что сделать, кто, срок, состояние."""
+    category = t.get("status_category")
+    if category == "DONE":
+        state = '<span class="tag done">сделано</span>'
+    elif t.get("is_blocked"):
+        reason = _rm_esc(t.get("blocked_reason") or "")
+        state = f'<span class="tag block">держит</span> {reason}'
+    elif category in ("REVIEW", "CHANGES_REQUIRED"):
+        state = f'<span class="tag wait">{_rm_esc(t.get("status_name"))}</span>'
+    elif category in ("IN_PROGRESS", "READY"):
+        state = f'<span class="tag work">{_rm_esc(t.get("status_name"))}</span>'
+    else:
+        state = _rm_esc(t.get("status_name"))
+    return (
+        f'<tr><td><a href="{client.task_url(t["key"])}">{_rm_esc(t["key"])}</a></td>'
+        f"<td>{_rm_esc(t['title'])}</td>"
+        f"<td>{_rm_esc(t.get('assignee_name') or '—')}</td>"
+        f"<td>{_rm_day(t.get('due_at'))}</td><td>{state}</td></tr>"
+    )
+
+
+def _rm_decision_url(client, project_code: str, ref: str) -> str:
+    """Решение из реестра: /d/<код проекта>-<номер>, кросс-проектные — как есть."""
+    ref = (ref or "").strip()
+    if ":" in ref:
+        registry, number = ref.split(":", 1)
+        slug = f"{registry}-{number}" if registry != "_global" else f"g-{number}"
+    else:
+        slug = f"{project_code}-{ref}"
+    return f"{client.web_base}/d/{slug.lower()}"
+
+
+def _roadmap_html(client, r) -> str:
+    code = (r.get("project_code") or "").lower()
+    title = f"{r.get('project_name') or code}: {r['title']}"
+    sub = [_rm_period(r), _RM_STATUS_RU.get(r["status"], r["status"])]
+    if r.get("scope_note"):
+        sub.append(_rm_esc(r["scope_note"]))
+    if r.get("decision_ref"):
+        url = _rm_decision_url(client, code, r["decision_ref"])
+        sub.append(f'решение <a href="{url}">{_rm_esc(r["decision_ref"])}</a>')
+
+    parts = [
+        "<!doctype html>", '<html lang="ru">', "<head>", '<meta charset="utf-8">',
+        '<meta name="viewport" content="width=device-width, initial-scale=1">',
+        f"<title>{_rm_esc(title)}</title>", f"<style>{_RM_CSS}</style>", "</head>",
+        "<body><main>", f"<h1>{_rm_esc(title)}</h1>",
+        f'<p class="sub">{" · ".join(sub)}</p>',
+    ]
+    if r.get("goal"):
+        parts.append(f'<p class="note">{_rm_esc(r["goal"])}</p>')
+
+    tiles = [
+        (f"{r['done_count']}/{r['task_count']}", "пунктов плана сделано"),
+        (str(r["wave_count"]), "волн в периоде"),
+    ]
+    if r["metric_count"]:
+        tiles.append((
+            f"{r['metric_reached_count']}/{r['metric_count']}",
+            "метрик «было → цель» достигнуто",
+        ))
+    if r.get("period_end"):
+        tiles.append((_rm_day(r["period_end"]), "конец периода, отчёт со сверкой по пунктам"))
+    if r["blocked_count"] or r["overdue_count"]:
+        tiles.append((
+            f"{r['blocked_count']} + {r['overdue_count']}",
+            "заблокировано и просрочено",
+        ))
+    parts.append('<div class="tiles">')
+    for big, small in tiles:
+        parts.append(f'<div class="tile"><b>{_rm_esc(big)}</b><span>{_rm_esc(small)}</span></div>')
+    parts.append("</div>")
+
+    for wave in r.get("waves", []):
+        head = f"{wave['name']}"
+        if wave.get("due_date"):
+            head += f" · до {_rm_day(wave['due_date'])}"
+        head += f" · {wave['done_count']}/{wave['task_count']}"
+        parts.append(f"<h2>{_rm_esc(head)}</h2>")
+        if wave.get("description"):
+            parts.append(f"<p>{_rm_esc(wave['description'])}</p>")
+        if not wave.get("tasks"):
+            parts.append("<p>пунктов пока нет</p>")
+            continue
+        parts.append('<div class="wrap"><table>')
+        parts.append("<tr><th>Задача</th><th>Что</th><th>Исполнитель</th><th>Срок</th>"
+                     "<th>Состояние</th></tr>")
+        parts.extend(_rm_task_row(client, t) for t in wave["tasks"])
+        parts.append("</table></div>")
+
+    if r.get("metrics"):
+        parts.append("<h2>Было → цель → стало</h2>")
+        parts.append('<div class="wrap"><table>')
+        parts.append("<tr><th>Пункт</th><th>Было</th><th>Цель</th><th>Сейчас</th>"
+                     "<th>Чем снято</th></tr>")
+        for m in r["metrics"]:
+            was = _rm_esc(m.get("baseline") or "—")
+            if m.get("baseline_on"):
+                was += f' <span class="tag wait">{_rm_day(m["baseline_on"])}</span>'
+            now = _rm_esc(m.get("current") or "пока нет")
+            if m.get("reached_on"):
+                now += ' <span class="tag done">цель</span>'
+            source = _rm_esc(m.get("source") or "—")
+            if m.get("measured_on"):
+                source += f", {_rm_day(m['measured_on'])}"
+            parts.append(f"<tr><td>{_rm_esc(m['name'])}</td><td>{was}</td>"
+                         f"<td>{_rm_esc(m.get('target') or '—')}</td><td>{now}</td>"
+                         f"<td>{source}</td></tr>")
+        parts.append("</table></div>")
+
+    if r.get("waiting") or r.get("open_decisions"):
+        parts.append("<h2>Нужно от владельца и клиента</h2><ul>")
+        for t in r.get("waiting", []):
+            parts.append(
+                f'<li><a href="{client.task_url(t["key"])}">{_rm_esc(t["key"])}</a>: '
+                f"{_rm_esc(t['title'])} — {_rm_esc(t.get('blocked_reason') or 'без причины')}</li>"
+            )
+        for d in r.get("open_decisions", []):
+            url = _rm_decision_url(client, code, d["ref"])
+            parts.append(f'<li><a href="{url}">{_rm_esc(d["ref"])}</a>: '
+                         f"{_rm_esc(d['question'])}</li>")
+        parts.append("</ul>")
+
+    if r.get("plan_url"):
+        parts.append(f'<p class="foot">Исходный план: '
+                     f'<a href="{_rm_esc(r["plan_url"])}">{_rm_esc(r["plan_url"])}</a></p>')
+    board = f"{client.web_base}/projects/{code}/roadmap" if code else client.web_base
+    parts.append(
+        f'<p class="foot">Собрано из PMS {_rm_day(_dt.date.today().isoformat())} — '
+        f'правки вносятся в задачи и метрики роадмапа, отчёт пересобирается: '
+        f'<a href="{board}">{board}</a></p>'
+    )
+    parts.append("</main></body></html>")
+    return "\n".join(parts) + "\n"
+
+
+def cmd_roadmap_report(client, args):
+    """Отчёт роадмапа — рендер данных PMS, а не отдельный рукописный файл.
+
+    Поэтому сверка по пунктам всегда совпадает с доской: правки вносятся в
+    задачи и метрики, отчёт пересобирается этой же командой и выкладывается
+    скиллом publish-report.
+    """
+    r = _roadmap_of(client, args)
+    page = _roadmap_html(client, r)
+    code = (r.get("project_code") or "roadmap").lower()
+    path = Path(args.out) if args.out else Path(
+        f"reports/{code}-roadmap-{_dt.date.today().isoformat()}.html"
+    )
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(page, encoding="utf-8")
+    print(f"{path}  ({len(page)} байт)")
+    print("выложить: bash ~/.claude/skills/publish-report/publish.sh "
+          f"{path} {code}")
+
+
 def cmd_lead_list(client, args):
     project = resolve_project(client, args.project)
     q = []
@@ -1167,12 +1636,31 @@ def cmd_lead_ingest(_client, args):
         f"{'создан' if r['created'] else 'уже был'} {r['key']} [{r['stage_name']}]\n{r['url']}"))
 
 
+def cmd_decisions_sync(client, args):
+    """Залить копию реестра решений из вики (decisions.py pms-export). KL-226."""
+    body = json.loads(Path(args.json_file).read_text()) if args.json_file != "-" else json.load(sys.stdin)
+    r = client.call("PUT", "/decisions/sync", body)
+
+    def show(r):
+        for x in r["registries"]:
+            if x.get("skipped"):
+                print(f"{x['registry']:24} пропущен: {x['skipped']}")
+            elif x["created"] or x["updated"] or x["deleted"]:
+                print(f"{x['registry']:24} {x['total']:4}  +{x['created']} ~{x['updated']} -{x['deleted']}")
+        print("реестров:", len(r["registries"]), "· записей:", sum(x["total"] for x in r["registries"]))
+
+    out(r, args.json, show)
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="pms.py", description="PMS task control CLI")
     p.add_argument("--json", action="store_true", help="machine-readable JSON output")
     sub = p.add_subparsers(dest="cmd", required=True)
 
     sub.add_parser("whoami").set_defaults(fn=cmd_whoami)
+    sp = sub.add_parser("decisions-sync", help="залить копию реестра решений (JSON-файл или - для stdin)")
+    sp.add_argument("json_file")
+    sp.set_defaults(fn=cmd_decisions_sync)
     sp = sub.add_parser("projects", help="list projects")
     sp.add_argument("--archived", action="store_true", help="include archived projects")
     sp.set_defaults(fn=cmd_projects)
@@ -1183,7 +1671,15 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--name", required=True)
     sp.add_argument("--group", help="portfolio group, e.g. Клиентские")
     sp.add_argument("--goal")
+    sp.add_argument("--site", help="сайт проекта (https://example.ru): пути /lk/… в задачах станут ссылками")
     sp.set_defaults(fn=cmd_project_add)
+
+    sp = sub.add_parser("project-edit", help="поменять поля проекта (сайт, название, группа)")
+    sp.add_argument("code")
+    sp.add_argument("--site", help="https://example.ru; none — снять")
+    sp.add_argument("--name")
+    sp.add_argument("--group")
+    sp.set_defaults(fn=cmd_project_edit)
 
     sp = sub.add_parser("list", help="list tasks in a project")
     sp.add_argument("--project", required=True)
@@ -1209,6 +1705,9 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--assignee", help="email or name")
     sp.add_argument("--attach", action="append", metavar="FILE",
                     help="прикрепить файл к задаче (можно повторять), напр. скриншот")
+    sp.add_argument("--brief", metavar="TEMPLATE",
+                    help="ТЗ из хранимого шаблона seo-engine/briefs (briefs.py list): описание = шаблон + --desc")
+    sp.add_argument("--param", action="append", metavar="K=V", help="параметр шаблона --brief (можно повторять)")
     sp.set_defaults(fn=cmd_add)
 
     sp = sub.add_parser("edit", help="update title/description/priority/due of an existing task")
@@ -1232,6 +1731,7 @@ def build_parser() -> argparse.ArgumentParser:
     sp = sub.add_parser("status", help="change status by name/category")
     sp.add_argument("key")
     sp.add_argument("status")
+    sp.add_argument("--reason", help="чем задача заблокирована (обязательно для BLOCKED)")
     sp.set_defaults(fn=cmd_status)
 
     sp = sub.add_parser("done", help="move task to a DONE status")
@@ -1331,6 +1831,90 @@ def build_parser() -> argparse.ArgumentParser:
     m.add_argument("--doc", help="ссылка на документ в Drive")
     m.add_argument("--note")
     m.set_defaults(fn=cmd_money_contract_add)
+
+    # ---- roadmap: роадмап проекта ----------------------------------------
+    sp = sub.add_parser("roadmap", help="роадмап проекта: период, волны, метрики, отчёт")
+    rsub = sp.add_subparsers(dest="roadmap_cmd", required=True)
+
+    m = rsub.add_parser("list", help="роадмапы проекта или таймлайн портфеля")
+    m.add_argument("--project", help="код проекта; без него — по одному на каждый проект")
+    m.add_argument("--archived", action="store_true", help="включая архивные")
+    m.set_defaults(fn=cmd_roadmap_list)
+
+    m = rsub.add_parser("show", help="роадмап целиком: волны, пункты, метрики, блокеры")
+    m.add_argument("--project")
+    m.add_argument("--id", help="id роадмапа, если у проекта их несколько")
+    m.set_defaults(fn=cmd_roadmap_show)
+
+    m = rsub.add_parser("add", help="завести роадмап на период")
+    m.add_argument("--project", required=True)
+    m.add_argument("--title", required=True, help='например "Месяц 1"')
+    m.add_argument("--start", required=True, metavar="WHEN", help=DUE_HELP)
+    m.add_argument("--end", metavar="WHEN", help=DUE_HELP)
+    m.add_argument("--status", choices=["DRAFT", "AGREED", "ACTIVE", "COMPLETED", "CANCELLED"])
+    m.add_argument("--goal", help="цель периода")
+    m.add_argument("--scope", help="чем согласован: «план из 14 пунктов, клиент 27.10 (K-006)»")
+    m.add_argument("--agreed", metavar="WHEN", help="дата согласования")
+    m.add_argument("--decision", help="номер в реестре решений: K-006, _global:P-040")
+    m.add_argument("--plan-url", dest="plan_url", help="ссылка на исходный план или КП")
+    m.add_argument("--report-url", dest="report_url", help="ссылка на опубликованный отчёт")
+    m.set_defaults(fn=cmd_roadmap_add)
+
+    m = rsub.add_parser("edit", help="поменять период, статус, согласование, ссылки")
+    m.add_argument("--project")
+    m.add_argument("--id")
+    m.add_argument("--title")
+    m.add_argument("--start", metavar="WHEN", help=DUE_HELP)
+    m.add_argument("--end", metavar="WHEN", help=DUE_HELP)
+    m.add_argument("--status", choices=["DRAFT", "AGREED", "ACTIVE", "COMPLETED", "CANCELLED"])
+    m.add_argument("--goal")
+    m.add_argument("--scope")
+    m.add_argument("--agreed", metavar="WHEN")
+    m.add_argument("--decision")
+    m.add_argument("--plan-url", dest="plan_url")
+    m.add_argument("--report-url", dest="report_url")
+    m.add_argument("--archive", action="store_true", help="в архив")
+    m.set_defaults(fn=cmd_roadmap_edit)
+
+    m = rsub.add_parser("wave-add", help="волна роадмапа (неделя, пакет, выкладка)")
+    m.add_argument("--project")
+    m.add_argument("--id", help="id роадмапа")
+    m.add_argument("--name", required=True)
+    m.add_argument("--due", metavar="WHEN", help=DUE_HELP)
+    m.add_argument("--desc")
+    m.add_argument("--tasks", help="ключи уже существующих задач через запятую: SPD-6,SPD-19")
+    m.set_defaults(fn=cmd_roadmap_wave_add)
+
+    m = rsub.add_parser("metric-add", help="строка «было → цель»")
+    m.add_argument("--project")
+    m.add_argument("--id", help="id роадмапа")
+    m.add_argument("--name", required=True)
+    m.add_argument("--baseline", help="как есть сейчас: «0 из 165»")
+    m.add_argument("--baseline-on", dest="baseline_on", metavar="WHEN", help="когда снято «было»")
+    m.add_argument("--target", help="цель: «165 из 165»")
+    m.add_argument("--current", help="текущее значение, если уже меряли")
+    m.add_argument("--measured-on", dest="measured_on", metavar="WHEN")
+    m.add_argument("--reached-on", dest="reached_on", metavar="WHEN", help="когда цель достигнута")
+    m.add_argument("--source", help="чем снято: краул, Топвизор, GSC")
+    m.set_defaults(fn=cmd_roadmap_metric_add)
+
+    m = rsub.add_parser("metric-set", help="обновить метрику при сверке")
+    m.add_argument("metric", help="id метрики (виден в roadmap show)")
+    m.add_argument("--name")
+    m.add_argument("--baseline")
+    m.add_argument("--baseline-on", dest="baseline_on", metavar="WHEN")
+    m.add_argument("--target")
+    m.add_argument("--current")
+    m.add_argument("--measured-on", dest="measured_on", metavar="WHEN")
+    m.add_argument("--reached-on", dest="reached_on", metavar="WHEN")
+    m.add_argument("--source")
+    m.set_defaults(fn=cmd_roadmap_metric_set)
+
+    m = rsub.add_parser("report", help="собрать HTML-отчёт роадмапа из данных PMS")
+    m.add_argument("--project")
+    m.add_argument("--id")
+    m.add_argument("--out", help="путь файла; по умолчанию reports/<код>-roadmap-<дата>.html")
+    m.set_defaults(fn=cmd_roadmap_report)
 
     # ---- lead: лиды проекта ----------------------------------------------
     sp = sub.add_parser("lead", help="лиды проекта (модуль включается: lead enable)")

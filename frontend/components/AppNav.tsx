@@ -7,7 +7,14 @@ import { clearTokens, getMe, getUnreadCount } from "@/lib/api";
 import { useT } from "@/lib/locale";
 import { LanguageSwitcher } from "@/components/LanguageSwitcher";
 
-type Key = "dashboard" | "myTasks" | "myReviews" | "allTasks" | "projects" | "users";
+type Key =
+  | "dashboard"
+  | "myTasks"
+  | "myReviews"
+  | "allTasks"
+  | "projects"
+  | "roadmap"
+  | "users";
 
 const LINKS: { key: Key; href: string; label: string }[] = [
   { key: "dashboard", href: "/dashboard", label: "nav.dashboard" },
@@ -15,6 +22,7 @@ const LINKS: { key: Key; href: string; label: string }[] = [
   { key: "myReviews", href: "/my-reviews", label: "nav.myReviews" },
   { key: "allTasks", href: "/all-tasks", label: "nav.allTasks" },
   { key: "projects", href: "/projects", label: "nav.projects" },
+  { key: "roadmap", href: "/roadmap", label: "nav.roadmap" },
 ];
 
 export function AppNav({ active }: { active?: Key }) {

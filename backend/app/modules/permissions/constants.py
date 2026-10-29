@@ -37,6 +37,11 @@ class Perm(StrEnum):
     ATTACHMENT_UPLOAD = "attachment.upload"
     ATTACHMENT_DELETE = "attachment.delete"
 
+    # Роадмап: период работ, метрики «было → цель → стало», ссылка на отчёт.
+    # Видят все, кто видит проект; ведёт тот же уровень, что и спринты.
+    ROADMAP_VIEW = "roadmap.view"
+    ROADMAP_MANAGE = "roadmap.manage"
+
     SPRINT_VIEW = "sprint.view"
     SPRINT_MANAGE = "sprint.manage"
 
@@ -67,6 +72,7 @@ _READ_PERMS: frozenset[Perm] = frozenset(
         Perm.PROJECT_MEMBERS_VIEW,
         Perm.TASK_VIEW,
         Perm.SPRINT_VIEW,
+        Perm.ROADMAP_VIEW,
         Perm.BOARD_VIEW,
     }
 )
@@ -96,6 +102,7 @@ _MANAGER_PERMS: frozenset[Perm] = _MEMBER_PERMS | frozenset(
         Perm.COMMENT_DELETE,
         Perm.ATTACHMENT_DELETE,
         Perm.SPRINT_MANAGE,
+        Perm.ROADMAP_MANAGE,
         Perm.BOARD_MANAGE,
         Perm.FINANCE_VIEW,
         Perm.FINANCE_MANAGE,

@@ -17,6 +17,7 @@ from app.modules.initiatives.router import router as initiatives_router
 from app.modules.leads.router import router as leads_router
 from app.modules.notifications.router import router as notifications_router
 from app.modules.projects.router import router as projects_router
+from app.modules.roadmaps.router import router as roadmaps_router
 from app.modules.search.router import router as search_router
 from app.modules.sprints.router import router as sprints_router
 from app.modules.tasks.router import router as tasks_router
@@ -52,6 +53,7 @@ app.include_router(comments_router)
 app.include_router(attachments_router)
 app.include_router(initiatives_router)
 app.include_router(sprints_router)
+app.include_router(roadmaps_router)
 app.include_router(dashboard_router)
 app.include_router(finance_router)
 app.include_router(leads_router)

@@ -2,6 +2,38 @@
 
 ## Unreleased
 
+**Roadmaps.** A roadmap is the wrapper a plan needs and the board does not
+have: the agreed period, what it was agreed by, the waves inside it, the
+baseline → target → current table and a link to the published report.
+
+- Tables `roadmaps` + `roadmap_metrics`, waves are initiatives
+  (`initiatives.roadmap_id`); migration `a7b8c9d0e1f2`.
+- Nothing derivable is stored: progress, overdue and blocked counts come from
+  the tasks of the waves, and "waiting on the owner or client" from blocked
+  tasks plus the open questions of the decision registry copy. Metric values
+  are text, not numbers — real baselines read "0 of 165".
+- API: `GET /projects/{id}/roadmap` (the current one), `/roadmaps/{id}` with
+  waves, metrics and blockers, `/roadmap` as one portfolio timeline, metric
+  CRUD; `roadmap.view` for anyone who sees the project, `roadmap.manage` from
+  manager up.
+- Frontend: a **Roadmap** tab per project and `/roadmap` across projects, where
+  the progress bar carries a tick for where the period calendar stands today.
+- CLI: `pms.py roadmap list|show|add|edit|wave-add|metric-add|metric-set|report`.
+  `report` renders the same white-background HTML the published roadmaps use,
+  from PMS data — the report becomes a render, not a second copy of the truth.
+  `pms.py status` now takes `--reason` (required for a BLOCKED status, Rule 8).
+- Tests `tests/test_roadmaps.py` (6). **129 pytest** in all.
+
+**Docs.** [docs/PRODUCT.md](docs/PRODUCT.md) — the long-form product
+description: who it's for, the problem, the domain decisions, AI agents as
+first-class users, and what PMS deliberately is not.
+
+**Repository.** The 0.4.0 decision log (running on prod since 21.10) and the
+0.4.1 links feature (built live on 26.10, never committed) are now both in
+`main` together with the two fixes that had been committed but not deployed.
+`pms.py project-edit` and `decisions-sync` came back from the server the same
+way.
+
 **Fix: commit before the response.** The request session (`get_db`) committed in
 the dependency's exit, and since FastAPI 0.121 a yield dependency exits only
 after the response has been sent. A client that got `201` and called right away

@@ -10,6 +10,7 @@ from app.core.deps import (
     require_project_permission,
 )
 from app.models.initiative import Initiative
+from app.models.roadmap import Roadmap
 from app.models.user import User
 from app.modules.initiatives import service
 from app.modules.initiatives.schemas import (
@@ -39,6 +40,18 @@ async def load_initiative(
     ):
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Initiative not found")
     return obj
+
+
+async def _checked_roadmap(
+    db: AsyncSession, workspace_id: UUID, project_id: UUID, roadmap_id: UUID | None
+) -> UUID | None:
+    """Волна может принадлежать только роадмапу того же проекта."""
+    if roadmap_id is None:
+        return None
+    roadmap = await db.get(Roadmap, roadmap_id)
+    if roadmap is None or roadmap.workspace_id != workspace_id or roadmap.project_id != project_id:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Roadmap not found in this project")
+    return roadmap.id
 
 
 async def _require_edit(
@@ -77,6 +90,7 @@ async def create_initiative(
         name=body.name,
         description=body.description,
         due_date=body.due_date,
+        roadmap_id=await _checked_roadmap(db, workspace_id, project_id, body.roadmap_id),
     )
     db.add(obj)
     await db.flush()
@@ -116,6 +130,10 @@ async def update_initiative(
         initiative.description = body.description
     if "due_date" in body.model_fields_set:
         initiative.due_date = body.due_date
+    if "roadmap_id" in body.model_fields_set:
+        initiative.roadmap_id = await _checked_roadmap(
+            db, workspace_id, initiative.project_id, body.roadmap_id
+        )
     await db.flush()
     return await service.get_out(db, initiative)
 

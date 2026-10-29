@@ -6,7 +6,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "test": "rm -rf .test-build && tsc --outDir .test-build --module commonjs --target es2022 --esModuleInterop --skipLibCheck --types node lib/links.test.ts && node --test .test-build/"
   },
   "dependencies": {
     "next": "15.5.28",

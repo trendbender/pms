@@ -49,3 +49,6 @@ deploy/nginx-pms.conf
 
 # Внутренние ТЗ: коды клиентских проектов, имена внутренних скриптов и источников лидов.
 /docs/specs/
+
+# frontend unit tests (npm test)
+.test-build/

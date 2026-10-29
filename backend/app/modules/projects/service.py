@@ -51,6 +51,7 @@ async def create_project(
     goal: str | None,
     wip_limit: int | None,
     group_name: str | None = None,
+    site_url: str | None = None,
 ) -> Project:
     project = Project(
         workspace_id=workspace_id,
@@ -59,6 +60,7 @@ async def create_project(
         description=description,
         goal=goal,
         group_name=group_name,
+        site_url=site_url,
         wip_limit=wip_limit,
         owner_id=creator_id,
         status="DRAFT",

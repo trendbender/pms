@@ -33,6 +33,7 @@ import {
   getTaskComments,
   getTaskDecisions,
   listAttachments,
+  listProjects,
   listStatuses,
   listUsers,
   projectSlug,
@@ -41,7 +42,7 @@ import {
 } from "@/lib/api";
 import { useT } from "@/lib/locale";
 import { PRIORITY_STYLES } from "@/lib/buckets";
-import { linkDecisionRefsMarkdown, splitDecisionRefs } from "@/lib/decisionRefs";
+import { LinkContext, linkifyMarkdown, splitLinks } from "@/lib/links";
 
 const CAT_DOT: Record<string, string> = {
   BACKLOG: "#94a3b8",
@@ -76,6 +77,7 @@ export default function TaskPage() {
   const [activity, setActivity] = useState<TaskActivity[]>([]);
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [decisions, setDecisions] = useState<Decision[]>([]);
+  const [taskCodes, setTaskCodes] = useState<ReadonlySet<string>>(new Set());
   const [comment, setComment] = useState("");
   const [editingDesc, setEditingDesc] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -87,6 +89,12 @@ export default function TaskPage() {
   // Breadcrumb / post-delete redirect: prefer the readable project alias (its
   // code), fall back to the UUID until the project has loaded.
   const projectHref = project ? projectSlug(project.code) : (task?.project_id ?? "");
+  // ключи задач, пути сайта проекта и номера решений в тексте — ссылки (lib/links.ts)
+  const linkCtx: LinkContext = {
+    projectCode: project?.code,
+    siteUrl: project?.site_url,
+    taskCodes,
+  };
 
   const load = useCallback(async () => {
     try {
@@ -123,6 +131,12 @@ export default function TaskPage() {
   useEffect(() => {
     load();
   }, [load]);
+
+  useEffect(() => {
+    listProjects(true)
+      .then((ps) => setTaskCodes(new Set(ps.map((p) => p.code))))
+      .catch(() => {});
+  }, []);
 
   // Paste screenshots / files straight from the clipboard (Cmd/Ctrl+V).
   useEffect(() => {
@@ -298,7 +312,7 @@ export default function TaskPage() {
                 className="min-h-[3rem] w-full cursor-text rounded-lg border border-transparent px-3 py-2 text-sm leading-relaxed hover:border-slate-200"
               >
                 {task.description ? (
-                  <Markdown text={task.description} projectCode={project?.code} />
+                  <Markdown text={task.description} ctx={linkCtx} />
                 ) : (
                   <span className="text-muted">{t("task.descPlaceholder")}</span>
                 )}
@@ -434,7 +448,7 @@ export default function TaskPage() {
                       )}
                     </div>
                     <div className="mt-1 whitespace-pre-wrap rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700">
-                      <Linkified text={c.body} projectCode={project?.code} />
+                      <Linkified text={c.body} ctx={linkCtx} />
                     </div>
                   </div>
                 </div>
@@ -583,34 +597,28 @@ export default function TaskPage() {
   );
 }
 
-// Render plain text with clickable http(s) links and decision numbers (P-030).
-function Linkified({ text, projectCode }: { text: string; projectCode?: string }) {
-  const parts = text.split(/(https?:\/\/[^\s]+)/g);
+// Render plain text with clickable links: http(s) URLs, site paths of the
+// project, task keys (SSK-262) and decision numbers (P-030).
+function Linkified({ text, ctx }: { text: string; ctx: LinkContext }) {
   return (
     <>
-      {parts.map((part, i) =>
-        /^https?:\/\//.test(part) ? (
+      {splitLinks(text, ctx).map((r, i) =>
+        !r.href ? (
+          <span key={i}>{r.text}</span>
+        ) : r.external ? (
           <a
             key={i}
-            href={part}
+            href={r.href}
             target="_blank"
             rel="noopener noreferrer"
             className="break-all text-indigo-600 underline hover:text-indigo-700"
           >
-            {part}
+            {r.text}
           </a>
         ) : (
-          <span key={i}>
-            {splitDecisionRefs(part, projectCode).map((r, j) =>
-              r.href ? (
-                <Link key={j} href={r.href} className="text-indigo-600 underline hover:text-indigo-700">
-                  {r.text}
-                </Link>
-              ) : (
-                <span key={j}>{r.text}</span>
-              )
-            )}
-          </span>
+          <Link key={i} href={r.href} className="text-indigo-600 underline hover:text-indigo-700">
+            {r.text}
+          </Link>
         )
       )}
     </>
@@ -620,7 +628,7 @@ function Linkified({ text, projectCode }: { text: string; projectCode?: string }
 // Render a task description as Markdown (headings, lists, bold, links, tables).
 // Single newlines become <br> (remark-breaks) so plain-text descriptions keep
 // their line breaks; bare URLs auto-link (remark-gfm). No raw HTML → XSS-safe.
-function Markdown({ text, projectCode }: { text: string; projectCode?: string }) {
+function Markdown({ text, ctx }: { text: string; ctx: LinkContext }) {
   return (
     <ReactMarkdown
       remarkPlugins={[remarkGfm, remarkBreaks]}
@@ -659,7 +667,7 @@ function Markdown({ text, projectCode }: { text: string; projectCode?: string })
         td: ({ node, ...props }) => <td className="border border-slate-200 px-2 py-1" {...props} />,
       }}
     >
-      {linkDecisionRefsMarkdown(text, projectCode)}
+      {linkifyMarkdown(text, ctx)}
     </ReactMarkdown>
   );
 }

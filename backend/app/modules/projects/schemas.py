@@ -4,6 +4,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, EmailStr, Field, field_validator
 
+from app.core.links import normalize_site_url
 from app.models.enums import (
     ProjectHealth,
     ProjectRole,
@@ -20,7 +21,13 @@ class ProjectCreate(BaseModel):
     description: str | None = None
     goal: str | None = None
     group_name: str | None = Field(default=None, max_length=60)
+    site_url: str | None = Field(default=None, max_length=255)
     wip_limit: int | None = Field(default=None, ge=1, le=100)
+
+    @field_validator("site_url")
+    @classmethod
+    def _normalize_site_url(cls, v: str | None) -> str | None:
+        return normalize_site_url(v)
 
     @field_validator("code")
     @classmethod
@@ -36,12 +43,19 @@ class ProjectUpdate(BaseModel):
     description: str | None = None
     goal: str | None = None
     group_name: str | None = Field(default=None, max_length=60)
+    # "" очищает поле
+    site_url: str | None = Field(default=None, max_length=255)
     status: ProjectStatus | None = None
     health: ProjectHealth | None = None
     wip_limit: int | None = Field(default=None, ge=1, le=100)
     owner_id: UUID | None = None
     start_date: datetime | None = None
     due_date: datetime | None = None
+
+    @field_validator("site_url")
+    @classmethod
+    def _normalize_site_url(cls, v: str | None) -> str | None:
+        return normalize_site_url(v)
 
 
 class ProjectOut(BaseModel):
@@ -54,6 +68,7 @@ class ProjectOut(BaseModel):
     status: str
     health: str
     group_name: str | None
+    site_url: str | None = None
     owner_id: UUID | None
     wip_limit: int | None
     start_date: datetime | None

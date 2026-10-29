@@ -230,6 +230,7 @@ export interface Project {
   status: string;
   health: string;
   group_name: string | null;
+  site_url?: string | null;
   owner_id: string | null;
   wip_limit: number | null;
   archived_at: string | null;
@@ -256,6 +257,7 @@ export interface ProjectPatch {
   description?: string;
   goal?: string;
   group_name?: string;
+  site_url?: string;
   status?: string;
   health?: string;
   wip_limit?: number | null;

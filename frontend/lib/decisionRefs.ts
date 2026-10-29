@@ -3,14 +3,14 @@
 // (реестр другого проекта), «_global:P-022» (кросс-проектные правила).
 // Одна буква области и три цифры, поэтому ключи задач (SSK-203) сюда не попадают.
 
-const REF_RE = /(?<![\w/.\-\[])(?:([A-Za-z_][\w]*):)?([A-Z])-(\d{3})(?![\w-])/g;
+export const REF_RE = /(?<![\w/.\-\[])(?:([A-Za-z_][\w]*):)?([A-Z])-(\d{3})(?![\w-])/g;
 
 export interface RefPart {
   text: string;
   href?: string;
 }
 
-function hrefFor(prefix: string | undefined, letter: string, num: string, projectCode?: string) {
+export function hrefFor(prefix: string | undefined, letter: string, num: string, projectCode?: string) {
   const p = prefix ? (prefix.toLowerCase() === "_global" ? "g" : prefix) : projectCode;
   if (!p) return undefined;
   return `/d/${p.toLowerCase()}-${letter.toLowerCase()}-${num}`;

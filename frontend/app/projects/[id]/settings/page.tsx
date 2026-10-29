@@ -31,6 +31,7 @@ interface Form {
   goal: string;
   description: string;
   group_name: string;
+  site_url: string;
   status: string;
   health: string;
   wip_limit: string;
@@ -41,6 +42,7 @@ const EMPTY: Form = {
   goal: "",
   description: "",
   group_name: "",
+  site_url: "",
   status: "DRAFT",
   health: "ON_TRACK",
   wip_limit: "",
@@ -52,6 +54,7 @@ function toForm(p: Project): Form {
     goal: p.goal ?? "",
     description: p.description ?? "",
     group_name: p.group_name ?? "",
+    site_url: p.site_url ?? "",
     status: p.status === "ARCHIVED" ? "ACTIVE" : p.status,
     health: p.health,
     wip_limit: p.wip_limit != null ? String(p.wip_limit) : "",
@@ -119,6 +122,7 @@ export default function ProjectSettingsPage() {
         goal: form.goal.trim(),
         description: form.description.trim(),
         group_name: form.group_name.trim(),
+        site_url: form.site_url.trim(),
         // an archived project keeps its ARCHIVED status until it is restored
         status: project.status === "ARCHIVED" ? undefined : form.status,
         health: form.health,
@@ -316,6 +320,16 @@ export default function ProjectSettingsPage() {
               className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
               placeholder={t("projects.groupPlaceholder")}
             />
+          </label>
+          <label className="block">
+            <span className="text-xs font-medium text-muted">{t("settings.siteUrl")}</span>
+            <input
+              value={form.site_url}
+              onChange={(e) => set("site_url", e.target.value)}
+              className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+              placeholder="https://example.ru"
+            />
+            <span className="mt-1 block text-xs text-muted">{t("settings.siteUrlHint")}</span>
           </label>
           <label className="block">
             <span className="text-xs font-medium text-muted">{t("settings.wip")}</span>

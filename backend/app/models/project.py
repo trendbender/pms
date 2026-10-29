@@ -31,6 +31,10 @@ class Project(Base, TimestampMixin):
     # so the owner can regroup without a schema change
     group_name: Mapped[str | None] = mapped_column(String(60), nullable=True)
 
+    # сайт проекта (https://skolkoskolko.ru): пути «/lk/…» в задачах и
+    # комментариях превращаются в абсолютные ссылки на него (app/core/links.py)
+    site_url: Mapped[str | None] = mapped_column(String(255), nullable=True)
+
     owner_id: Mapped[UUID | None] = mapped_column(
         ForeignKey("users.id", ondelete="SET NULL"), nullable=True
     )

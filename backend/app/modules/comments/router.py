@@ -7,7 +7,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.core.deps import get_current_user, get_workspace_id
+from app.core.links import absolutize_site_paths
 from app.models.comment import Comment
+from app.models.project import Project
 from app.models.task import Task
 from app.models.user import User
 from app.modules.audit.service import record_activity
@@ -36,6 +38,12 @@ async def _load_comment(
     ):
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Comment not found")
     return comment
+
+
+async def _absolute_links(db: AsyncSession, task: Task, text: str) -> str:
+    # пути сайта проекта («/lk/…») сохраняем абсолютными ссылками
+    project = await db.get(Project, task.project_id)
+    return absolutize_site_paths(text, project.site_url if project else None) or text
 
 
 @router.get("/tasks/{task_id}/comments", response_model=list[CommentOut])
@@ -68,9 +76,8 @@ async def create_comment(
         db, user.id, workspace_id, task.project_id, Perm.COMMENT_CREATE
     ):
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Missing permission: comment.create")
-    comment = Comment(
-        workspace_id=workspace_id, task_id=task.id, author_id=user.id, body=body.body
-    )
+    text = await _absolute_links(db, task, body.body)
+    comment = Comment(workspace_id=workspace_id, task_id=task.id, author_id=user.id, body=text)
     db.add(comment)
     await db.flush()
     await record_activity(
@@ -86,7 +93,7 @@ async def create_comment(
     for recipient in {task.assignee_id, task.reviewer_id}:
         await notify(
             db, workspace_id=workspace_id, user_id=recipient, actor_id=user.id,
-            kind="comment", title=label, body=body.body[:200], task_id=task.id,
+            kind="comment", title=label, body=text[:200], task_id=task.id,
         )
     return comment
 
@@ -107,7 +114,7 @@ async def update_comment(
     )
     if not (is_author and can_edit):
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Can only edit your own comment")
-    comment.body = body.body
+    comment.body = await _absolute_links(db, task, body.body)
     comment.edited_at = datetime.now(UTC)
     await db.flush()
     return comment

@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.4.1 — 2026-10-26
+
+**Clickable absolute links** in task descriptions and comments.
+
+- Projects get a website field (`projects.site_url`, migration `f6a7b8c9d0e1`,
+  project settings → "Project website"). A site path in a task or comment
+  (`/lk/turnkey/?admin=1&branch=63680`) is saved as an absolute URL on that
+  site, so the link stays absolute in the database, notifications and the CLI
+  (`backend/app/core/links.py`, on task create/update and comment create/edit).
+- Rendering (`frontend/lib/links.ts`): bare `https://…` URLs, site paths, task
+  keys (`SSK-262` → `/t/ssk-262`, existing project codes only) and decision
+  numbers become links. Trailing `.`, `,` and an unbalanced `)` stay outside a
+  link; `&` and `?` stay inside. Code spans, file paths (`/srv/…`, `~/…`,
+  `*.py`), single-segment slash commands (`/clear`) and ready Markdown links
+  are left alone.
+- Tests: `backend/tests/test_links.py`, `frontend` → `npm test` (node --test).
+
 ## 0.4.0 — 2026-10-21
 
 **Decision log**, a read-only copy of the per-project decision registries.

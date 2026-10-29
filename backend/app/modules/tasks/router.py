@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.core.deps import get_current_user, get_workspace_id
+from app.core.links import absolutize_site_paths
 from app.models.audit import ActivityLog
 from app.models.project import Project
 from app.models.task import Task
@@ -128,7 +129,7 @@ async def create_task(
         project=project,
         reporter_id=user.id,
         title=body.title,
-        description=body.description,
+        description=absolutize_site_paths(body.description, project.site_url),
         type_id=type_id,
         status_id=status_id,
         priority=body.priority.value,
@@ -137,8 +138,8 @@ async def create_task(
         parent_id=body.parent_id,
         initiative_id=body.initiative_id,
         sprint_id=body.sprint_id,
-        acceptance_criteria=body.acceptance_criteria,
-        definition_of_done=body.definition_of_done,
+        acceptance_criteria=absolutize_site_paths(body.acceptance_criteria, project.site_url),
+        definition_of_done=absolutize_site_paths(body.definition_of_done, project.site_url),
         story_points=body.story_points,
         start_at=body.start_at,
         due_at=body.due_at,
@@ -270,6 +271,13 @@ async def update_task(
         db, task.project_id, fields["initiative_id"]
     ):
         raise HTTPException(422, "initiative_id does not belong to this project")
+
+    # пути сайта проекта («/lk/…») сохраняем абсолютными ссылками
+    text_fields = fields.keys() & {"description", "acceptance_criteria", "definition_of_done"}
+    if text_fields:
+        project = await db.get(Project, task.project_id)
+        for f in text_fields:
+            fields[f] = absolutize_site_paths(fields[f], project.site_url if project else None)
 
     # activity log for the notable changes (spec §42)
     logged = {

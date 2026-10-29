@@ -82,6 +82,7 @@ async def create_project(
             goal=body.goal,
             wip_limit=body.wip_limit,
             group_name=body.group_name,
+            site_url=body.site_url,
         )
     except IntegrityError:
         await db.rollback()
@@ -160,6 +161,8 @@ async def update_project(
         val = getattr(body, field)
         if val is not None:
             setattr(project, field, val)
+    if "site_url" in body.model_fields_set:
+        project.site_url = body.site_url
     if body.status is not None:
         project.status = body.status.value
     if body.health is not None:

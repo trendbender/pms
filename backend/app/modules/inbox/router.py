@@ -104,14 +104,29 @@ async def _capture(
 
     data = body.model_dump(exclude={"project_id"})
     try:
-        item = await service.capture(
-            db, workspace_id=workspace_id, actor_id=user.id, project_id=project_id, **data
-        )
+        # savepoint: проигравшая гонку вставка не должна ронять всю транзакцию
+        async with db.begin_nested():
+            item = await service.capture(
+                db, workspace_id=workspace_id, actor_id=user.id, project_id=project_id, **data
+            )
     except IntegrityError as exc:
-        # два одинаковых вебхука разом: второй проиграл гонку на uq_inbox_external
-        raise HTTPException(
-            status.HTTP_409_CONFLICT, "Inbox item with this external_id already exists"
-        ) from exc
+        # Два одинаковых вебхука разом: второй проиграл гонку на uq_inbox_external.
+        # Отдаём ему тот пункт, который лёг первым — повтор идемпотентен и в гонке.
+        twin = (
+            await service.find_duplicate(
+                db,
+                project_id=project_id,
+                source=body.source,
+                external_id=body.external_id,
+            )
+            if (body.external_id and project_id is not None)
+            else None
+        )
+        if twin is None:
+            raise HTTPException(
+                status.HTTP_409_CONFLICT, "Inbox item with this external_id already exists"
+            ) from exc
+        return await _out(db, twin)
     return await _out(db, item)
 
 

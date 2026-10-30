@@ -33,7 +33,10 @@ turns "look at the October report sometime" into a next action.
 - CLI: `pms.py in add|list|count|show|edit|resolve`. The command is `in`, not
   `inbox` — `pms.py inbox --assignee opencode` is the AI pipeline's executor
   queue and its callers stay unbroken (open question P-005).
-- Tests `tests/test_inbox.py` (14). **164 pytest** in all.
+- Tests `tests/test_inbox.py` (15), the parallel-repeat one among them: eight bots
+  posting the same report at once get one item, not a 500 — the losing insert goes
+  through a savepoint, so it doesn't poison the request's transaction.
+  **165 pytest** in all.
 
 
 **Roadmaps.** A roadmap is the wrapper a plan needs and the board does not

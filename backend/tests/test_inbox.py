@@ -1,9 +1,12 @@
 """Инбокс: приём входящего, видимость и разбор по шести исходам (решение P-002)."""
 
+import asyncio
+
 import pytest
 from sqlalchemy import select
 
 from app.models.enums import ProjectRole, SystemRole
+from app.models.inbox import InboxItem
 from app.models.notification import Notification
 from tests.factories import make_user, make_workspace
 
@@ -136,6 +139,27 @@ async def test_guest_does_not_see_the_project_inbox(client, session):
         f"/projects/{proj['id']}/inbox", headers=_auth(guest_tok), json={"title": "x"}
     )
     assert r.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_parallel_repeats_with_one_external_id_give_one_item(client, session):
+    """Два бота, пославшие один и тот же отчёт разом, получают один пункт.
+
+    Предпроверка тут не спасает: гонку ловит уникальный индекс, и проигравшая
+    вставка не должна ни ронять запрос, ни класть второй пункт. asyncio.gather
+    поверх ASGITransport даёт настоящую параллельность на уровне БД.
+    """
+    _, _, tok, proj = await _setup(client, session)
+    payload = {"title": "Отчёт за октябрь", "source": "report", "external_id": "oct-2026"}
+    rs = await asyncio.gather(*[
+        client.post(f"/projects/{proj['id']}/inbox", headers=_auth(tok), json=payload)
+        for _ in range(8)
+    ])
+    assert {r.status_code for r in rs} == {201}, [r.text for r in rs if r.status_code != 201]
+    assert len({r.json()["id"] for r in rs}) == 1
+
+    rows = (await session.scalars(select(InboxItem))).all()
+    assert len(rows) == 1
 
 
 # --------------------------------------------------------------------------- #

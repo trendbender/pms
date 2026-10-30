@@ -5,11 +5,13 @@ from app.models.audit import ActivityLog, AuditLog
 from app.models.base import Base
 from app.models.comment import Comment
 from app.models.decision import Decision
+from app.models.delivery import OutboxMessage, ProjectChannel
 from app.models.finance import Contract, Payment
 from app.models.initiative import Initiative
 from app.models.lead import Lead, LeadEvent, LeadField, LeadIngestToken, LeadStage
 from app.models.notification import Notification
 from app.models.project import Project, ProjectMember
+from app.models.reminder import Reminder
 from app.models.roadmap import Roadmap, RoadmapMetric
 from app.models.sprint import Sprint
 from app.models.task import Task, TaskStatus, TaskType
@@ -41,6 +43,9 @@ __all__ = [
     "LeadIngestToken",
     "Attachment",
     "Notification",
+    "Reminder",
+    "ProjectChannel",
+    "OutboxMessage",
     "ActivityLog",
     "AuditLog",
 ]

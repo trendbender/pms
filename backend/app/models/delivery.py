@@ -50,7 +50,7 @@ class ProjectChannel(Base, TimestampMixin):
     # TELEGRAM (app.models.enums.ChannelKind); почта появится, когда будет SMTP.
     kind: Mapped[str] = mapped_column(String(20), nullable=False, default="TELEGRAM")
     name: Mapped[str] = mapped_column(String(100), nullable=False)
-    # Адрес в терминах канала: для Telegram — chat_id («-4853904340»).
+    # Адрес в терминах канала: для Telegram — chat_id («-1001234567890»).
     address: Mapped[str] = mapped_column(String(200), nullable=False)
     # Топик внутри чата, если он есть.
     thread_id: Mapped[str | None] = mapped_column(String(50), nullable=True)

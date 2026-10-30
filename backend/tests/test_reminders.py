@@ -150,7 +150,7 @@ async def test_fires_into_the_outbox_and_plans_the_next_one(client, session):
         project_id=UUID(project["id"]),
         kind="TELEGRAM",
         name="Чат проекта",
-        address="-4853904340",
+        address="-1001234567890",
     )
     session.add(channel)
     await session.flush()
@@ -172,7 +172,7 @@ async def test_fires_into_the_outbox_and_plans_the_next_one(client, session):
 
     message = (await session.scalars(select(OutboxMessage))).one()
     assert message.status == "PENDING"
-    assert message.address == "-4853904340"
+    assert message.address == "-1001234567890"
     assert "@vanstallin" in message.body
     assert task["key"].lower() in message.body  # ссылка на задачу
     assert message.scheduled_for == datetime(2026, 11, 4, 7, 0, tzinfo=UTC)
@@ -341,7 +341,7 @@ async def test_member_may_remind_in_pms_but_not_into_the_project_chat(client, se
     r = await client.post(
         f"/projects/{project['id']}/channels",
         headers=_auth(tok),
-        json={"name": "Чат проекта", "address": "-4853904340", "is_default": True},
+        json={"name": "Чат проекта", "address": "-1001234567890", "is_default": True},
     )
     assert r.status_code == 201, r.text
     channel = r.json()

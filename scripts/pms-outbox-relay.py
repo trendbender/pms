@@ -13,7 +13,7 @@
 Живёт на Hetzner (там же, где бот и его токен), ходит в прод-API служебным
 аккаунтом pms-bot. Запуск раз в минуту из crontab:
 
-    * * * * * flock -n /tmp/pms-outbox-relay.lock python3 /srv/projects/scripts/pms-outbox-relay.py >> /var/log/pms-outbox-relay.log 2>&1
+    * * * * * flock -n /tmp/pms-outbox-relay.lock python3 /srv/projects/scripts/pms-outbox-relay.py >> /home/claw/logs/pms-outbox-relay.log 2>&1
 
 Отправкой занимается tg-hub (`tghub_send`) — у него свои секрет-гейт, нарезка
 длинных сообщений и дедуп; дублировать их здесь нечем и незачем.

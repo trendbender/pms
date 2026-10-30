@@ -64,6 +64,12 @@ class Perm(StrEnum):
     REMINDER_EXTERNAL = "reminder.external"
     CHANNEL_MANAGE = "channel.manage"
 
+    # Инбокс: сырьё, ещё не задача (решение P-002). Видит и разбирает участник
+    # проекта, но НЕ наблюдатель и не гость: в инбоксе лежит внутренняя переписка
+    # и недоформулированное, а гость в проекте — это обычно клиент.
+    INBOX_VIEW = "inbox.view"
+    INBOX_MANAGE = "inbox.manage"
+
     LEAD_VIEW = "lead.view"
     LEAD_MANAGE = "lead.manage"
     LEAD_DELETE = "lead.delete"
@@ -99,6 +105,8 @@ _MEMBER_PERMS: frozenset[Perm] = _READ_PERMS | frozenset(
         Perm.LEAD_VIEW,
         Perm.LEAD_MANAGE,
         Perm.REMINDER_MANAGE,
+        Perm.INBOX_VIEW,
+        Perm.INBOX_MANAGE,
     }
 )
 

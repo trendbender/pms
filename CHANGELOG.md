@@ -2,6 +2,40 @@
 
 ## Unreleased
 
+**Inbox.** One trough for everything incoming (decision P-002). AI agents, bots
+and reports drop raw material into a project's inbox; the chat is left for what
+needs the owner's decision now. An inbox item is deliberately *not* a task: it
+never reaches the board, it gets no `CODE-N` key, and clarifying it is what
+turns "look at the October report sometime" into a next action.
+
+- Table `inbox_items`; migration `c9d0e1f2a3b4`. `project_id` is nullable — a
+  thought does not have to know its project to be written down; an item without
+  one is personal and visible to its author and addressee only, so §7 still holds.
+- **Six outcomes, no seventh:** did it myself (under two minutes) / task with a
+  next concrete action / delegated / calendar — *only* with a commitment
+  datetime / reference, with where it landed / trash. The outcome is written
+  once and stays: re-resolving is a 409 and a resolved item is not editable, so
+  "what became of this" keeps its answer.
+- The rules are enforced by the API, not suggested: the outcomes that create a
+  task require their own `title` (the raw subject is never copied into it, since
+  formulating the action *is* the clarify step), delegating requires an
+  assignee, and the calendar outcome requires `start_at` — a calendar where half
+  the entries can be skipped stops being a calendar.
+- API: `POST /inbox` and `POST /projects/{id}/inbox` (idempotent on
+  `source` + `external_id`, so a report run twice does not double the queue),
+  `GET /inbox` (open items across visible projects plus one's own personal
+  ones), `/inbox/count` for the nav badge and the morning digest, `PATCH` while
+  unresolved, `POST /inbox/{id}/resolve`. Permissions `inbox.view` /
+  `inbox.manage` start at project member: a viewer or guest — usually the
+  client — does not see raw internal material.
+- No ingest token, unlike leads (decision T-006): agents call PMS under their
+  own accounts (P-004), so every item records who put it there.
+- CLI: `pms.py in add|list|count|show|edit|resolve`. The command is `in`, not
+  `inbox` — `pms.py inbox --assignee opencode` is the AI pipeline's executor
+  queue and its callers stay unbroken (open question P-005).
+- Tests `tests/test_inbox.py` (14). **164 pytest** in all.
+
+
 **Roadmaps.** A roadmap is the wrapper a plan needs and the board does not
 have: the agreed period, what it was agreed by, the waves inside it, the
 baseline → target → current table and a link to the published report.

@@ -1653,6 +1653,190 @@ def cmd_decisions_sync(client, args):
 
 
 # --------------------------------------------------------------------------- #
+# Инбокс — единый жёлоб для входящего (решение P-002)
+# --------------------------------------------------------------------------- #
+
+# Шесть исходов разбора. Седьмого нет: «потом посмотрю» — это непустой инбокс.
+OUTCOME_RU = {
+    "DID": "сделал сам",
+    "TASK": "задача",
+    "DELEGATED": "делегировано",
+    "CALENDAR": "в календарь",
+    "REFERENCE": "справка",
+    "TRASH": "в мусор",
+}
+
+
+def resolve_inbox_item(client, ref: str) -> dict:
+    """Пункт адресуется первыми знаками id: ключа у сырья нет намеренно — ключ
+    выдаётся задаче, то есть обязательству, а инбокс обязательств не хранит."""
+    low = ref.strip().lower()
+    for state in ("NEW", "RESOLVED"):
+        items = client.call("GET", f"/inbox?status={state}&limit=500")
+        matched = [i for i in items if i["id"].startswith(low)]
+        if len(matched) > 1:
+            die(f"таких пунктов несколько: {', '.join(i['id'][:8] for i in matched)}")
+        if matched:
+            return matched[0]
+    die(f"пункт инбокса не найден: {ref} (список — pms.py in list)")
+
+
+def _inbox_line(i: dict) -> str:
+    where = i.get("project_code") or "личное"
+    head = f"{i['id'][:8]}  [{where:<8}] {i['source']:<12} {i['title']}"
+    if i["status"] == "NEW":
+        return head
+    tail = OUTCOME_RU.get(i["outcome"], i["outcome"] or "")
+    if i.get("task_key"):
+        tail += f" → {i['task_key']}"
+    elif i.get("reference_url"):
+        tail += f" → {i['reference_url']}"
+    if i.get("outcome_note"):
+        tail += f" ({i['outcome_note']})"
+    return f"{head}\n         {tail}"
+
+
+def cmd_in_add(client, args):
+    """Положить входящее в инбокс проекта вместо сообщения в чат."""
+    body = {"title": args.title, "source": args.source}
+    for field, value in (("body", args.body), ("url", args.url),
+                         ("external_id", args.external_id)):
+        if value:
+            body[field] = value
+    if args.to:
+        body["for_user_id"] = resolve_user(client, args.to)["id"]
+    if args.project:
+        project = resolve_project(client, args.project)
+        r = client.call("POST", f"/projects/{project['id']}/inbox", body)
+    else:
+        r = client.call("POST", "/inbox", body)
+    out(r, args.json, lambda r: print(
+        f"в инбокс {r.get('project_code') or '(личное)'}: {r['title']}\n"
+        f"разобрать: pms.py in resolve {r['id'][:8]} <did|task|delegate|calendar|reference|trash>"))
+
+
+def cmd_in_list(client, args):
+    path = f"/inbox?status={'RESOLVED' if args.resolved else 'NEW'}"
+    if args.project:
+        path += f"&project_id={resolve_project(client, args.project)['id']}"
+    if args.source:
+        path += f"&source={args.source}"
+    if args.mine:
+        path += "&mine_only=true"
+    items = client.call("GET", path)
+
+    def render(items):
+        head = "разобрано" if args.resolved else "ждёт разбора"
+        print(f"# инбокс — {head}: {len(items)}")
+        print("\n".join(_inbox_line(i) for i in items) if items
+              else ("пусто — инбокс разобран" if not args.resolved else "ничего"))
+    out(items, args.json, render)
+
+
+def cmd_in_count(client, args):
+    r = client.call("GET", "/inbox/count")
+    out(r, args.json, lambda r: print(
+        f"ждёт разбора: {r['new']}" + ("".join(
+            f"\n  {c['project_code'] or 'личное':<8} {c['new']}" for c in r["by_project"]))))
+
+
+def cmd_in_show(client, args):
+    i = resolve_inbox_item(client, args.ref)
+    users = {u["id"]: u["name"] for u in client.call("GET", "/users")}
+    if args.json:
+        out(i, True, None)
+        return
+    print(f"{i['id']}  [{i.get('project_code') or 'личное'}]  {i['source']}")
+    print(i["title"])
+    if i.get("url"):
+        print(i["url"])
+    if i.get("body"):
+        print(f"\n{i['body']}")
+    print(f"\nположил: {users.get(i.get('created_by_id'), '—')}"
+          f" · кому: {users.get(i.get('for_user_id'), 'инбокс проекта')}")
+    if i["status"] == "NEW":
+        print("статус: ждёт разбора")
+        return
+    print(f"исход: {OUTCOME_RU.get(i['outcome'], i['outcome'])}"
+          f" · разобрал: {users.get(i.get('resolved_by_id'), '—')}")
+    if i.get("task_key"):
+        print(f"задача: {client.task_url(i['task_key'])}")
+    if i.get("reference_url"):
+        print(f"справка: {i['reference_url']}")
+    if i.get("outcome_note"):
+        print(f"пометка: {i['outcome_note']}")
+
+
+def cmd_in_edit(client, args):
+    i = resolve_inbox_item(client, args.ref)
+    body = {}
+    if args.title:
+        body["title"] = args.title
+    if args.body is not None:
+        body["body"] = args.body
+    if args.url is not None:
+        body["url"] = args.url
+    if args.project:
+        body["project_id"] = resolve_project(client, args.project)["id"]
+    if args.to:
+        body["for_user_id"] = resolve_user(client, args.to)["id"]
+    if not body:
+        die("нечего менять: --title, --body, --url, --project или --to")
+    r = client.call("PATCH", f"/inbox/{i['id']}", body)
+    out(r, args.json, lambda r: print(_inbox_line(r)))
+
+
+def _calendar_moment(value: str) -> str:
+    """В календарь идёт окно времени, а не день: «05.11 10:00», не «05.11».
+
+    Голая дата у parse_due означает конец дня, и такое «обязательство» ничем не
+    отличается от срока — ровно то, из-за чего календарь перестаёт быть
+    календарём (вики projects/pms/attention-model).
+    """
+    # Время только через двоеточие: «05.11» иначе прошло бы за «05 ч 11 мин»
+    # (и parse_due всё равно понимает лишь формат с двоеточием).
+    if not re.search(r"\d{1,2}:\d{2}\s*$", (value or "").strip()):
+        die(f"в календарь — с временем: {value} (пример: '05.11 10:00')")
+    return parse_due(value)
+
+
+def cmd_in_resolve(client, args):
+    """Разбор пункта одним из шести исходов (P-002)."""
+    i = resolve_inbox_item(client, args.ref)
+    outcome = "DELEGATED" if args.outcome.lower().startswith("deleg") else args.outcome.upper()
+    body = {"outcome": outcome}
+    if args.note:
+        body["note"] = args.note
+    if outcome in ("TASK", "DELEGATED", "CALENDAR"):
+        if not args.action:
+            die("нужно следующее конкретное действие: --action \"...\"")
+        body["title"] = args.action
+        body["priority"] = args.priority
+        if args.project:
+            body["project_id"] = resolve_project(client, args.project)["id"]
+        if args.assignee:
+            body["assignee_id"] = resolve_user(client, args.assignee)["id"]
+        if args.due:
+            body["due_at"] = parse_due(args.due)
+    if outcome == "DELEGATED" and not body.get("assignee_id"):
+        die("делегировать можно только кому-то: --assignee")
+    if outcome == "CALENDAR":
+        if not args.at:
+            die("в календарь — только с датой-обязательством: --at '05.11 10:00'")
+        body["start_at"] = _calendar_moment(args.at)
+    if outcome == "REFERENCE":
+        if not (args.url or args.note):
+            die("справка должна куда-то лечь: --url или --note")
+        if args.url:
+            body["reference_url"] = args.url
+
+    r = client.call("POST", f"/inbox/{i['id']}/resolve", body)
+    out(r, args.json, lambda r: print(
+        f"{OUTCOME_RU.get(r['outcome'], r['outcome'])}: {r['title']}"
+        + (f"\n{client.task_url(r['task_key'])}" if r.get("task_key") else "")))
+
+
+# --------------------------------------------------------------------------- #
 # Напоминания и каналы проекта (движок PMS, а не cron)
 # --------------------------------------------------------------------------- #
 
@@ -2193,6 +2377,65 @@ def build_parser() -> argparse.ArgumentParser:
     m.add_argument("--token-file", help="файл с ключом; иначе env PMS_LEAD_TOKEN")
     m.add_argument("--api", help="адрес API, если нет конфига")
     m.set_defaults(fn=cmd_lead_ingest, no_auth=True)
+
+    # Инбокс. Команда называется "in", а не "inbox": "inbox" уже занята очередью
+    # исполнителя в конвейере ИИ (pms.py inbox --assignee opencode), и переименование
+    # сломало бы её вызовы в скриптах и conventions.
+    sp = sub.add_parser("in", help="инбокс: положить входящее и разобрать (P-002)")
+    isub = sp.add_subparsers(dest="sub", required=True)
+
+    m = isub.add_parser("add", help="положить входящее (вместо сообщения в чат)")
+    m.add_argument("title", help="что пришло, своими словами")
+    m.add_argument("--project", help="код проекта; без него пункт личный")
+    m.add_argument("--source", default="manual",
+                   help="откуда: telegram, claude-code, report, manual")
+    m.add_argument("--body", help="подробности")
+    m.add_argument("--url", help="ссылка на сообщение, отчёт, страницу")
+    m.add_argument("--to", help="кому адресовано (email или имя)")
+    m.add_argument("--external-id", dest="external_id",
+                   help="внешний id: повтор с тем же не кладёт второй пункт")
+    m.set_defaults(fn=cmd_in_add)
+
+    m = isub.add_parser("list", help="что ждёт разбора")
+    m.add_argument("--project")
+    m.add_argument("--source")
+    m.add_argument("--mine", action="store_true", help="только адресованное мне")
+    m.add_argument("--resolved", action="store_true", help="разобранное, с исходами")
+    m.set_defaults(fn=cmd_in_list)
+
+    m = isub.add_parser("count", help="сколько ждёт разбора (по проектам)")
+    m.set_defaults(fn=cmd_in_count)
+
+    m = isub.add_parser("show", help="пункт целиком")
+    m.add_argument("ref", help="первые знаки id (видно в list)")
+    m.set_defaults(fn=cmd_in_show)
+
+    m = isub.add_parser("edit", help="уточнить сырьё до разбора")
+    m.add_argument("ref")
+    m.add_argument("--title")
+    m.add_argument("--body")
+    m.add_argument("--url")
+    m.add_argument("--project", help="приписать проект")
+    m.add_argument("--to")
+    m.set_defaults(fn=cmd_in_edit)
+
+    m = isub.add_parser(
+        "resolve",
+        help="разобрать: did | task | delegate | calendar | reference | trash",
+    )
+    m.add_argument("ref")
+    m.add_argument("outcome", choices=["did", "task", "delegated", "delegate",
+                                       "calendar", "reference", "trash"])
+    m.add_argument("--action", help="следующее конкретное действие (для task/delegate/calendar)")
+    m.add_argument("--project", help="в какой проект, если пункт был личным")
+    m.add_argument("--assignee", help="кому делегировать")
+    m.add_argument("--due", help="срок задачи: 05.11, +3d, завтра")
+    m.add_argument("--at", help="для calendar: момент-обязательство, '05.11 10:00'")
+    m.add_argument("--priority", default="MEDIUM",
+                   choices=["CRITICAL", "HIGH", "MEDIUM", "LOW", "NONE"])
+    m.add_argument("--url", help="для reference: куда легла справка")
+    m.add_argument("--note", help="пометка: что именно сделано")
+    m.set_defaults(fn=cmd_in_resolve)
 
     sp = sub.add_parser("remind", help="напоминания по задаче (движок PMS, не cron)")
     rsub = sp.add_subparsers(dest="sub", required=True)

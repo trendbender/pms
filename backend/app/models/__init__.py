@@ -7,6 +7,7 @@ from app.models.comment import Comment
 from app.models.decision import Decision
 from app.models.delivery import OutboxMessage, ProjectChannel
 from app.models.finance import Contract, Payment
+from app.models.inbox import InboxItem
 from app.models.initiative import Initiative
 from app.models.lead import Lead, LeadEvent, LeadField, LeadIngestToken, LeadStage
 from app.models.notification import Notification
@@ -26,6 +27,7 @@ __all__ = [
     "Project",
     "ProjectMember",
     "Initiative",
+    "InboxItem",
     "Roadmap",
     "RoadmapMetric",
     "Sprint",

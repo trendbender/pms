@@ -64,6 +64,14 @@ problem it solves, the domain decisions, and what it deliberately is not.
 - **Money** — contracts and payments per project (expected / invoiced / paid),
   a payment calendar and forecast; overdue is computed, never stored. Visible to
   managers only.
+- **Inbox** — one trough for everything incoming, so the chat stops being a
+  to-do list: agents, bots and reports drop raw material into a project's inbox
+  instead of pinging a channel. An item is not a task — it never reaches the
+  board. Clarifying it has exactly six outcomes (did it myself / task with a
+  next concrete action / delegated / calendar, only with a commitment datetime /
+  reference / trash), and the API enforces them: the outcomes that create a task
+  demand their own wording, delegating demands someone, the calendar demands a
+  moment. Repeats with the same `source` + `external_id` don't double the queue.
 - **Notifications & search** — in-app notifications on assignment, review
   requests, change requests and comments; full-text-ish search across task keys,
   titles, descriptions and comment bodies.

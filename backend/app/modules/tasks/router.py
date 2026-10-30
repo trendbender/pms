@@ -16,6 +16,7 @@ from app.modules.audit.service import record_activity
 from app.modules.notifications.service import notify
 from app.modules.permissions import service as perms
 from app.modules.permissions.constants import Perm
+from app.modules.reminders import service as reminders_service
 from app.modules.tasks import service
 from app.modules.tasks.schemas import (
     ActivityOut,
@@ -312,6 +313,9 @@ async def update_task(
                     db, workspace_id=task.workspace_id, user_id=value, actor_id=user.id,
                     kind="review.requested", title=f"{task.key}: {task.title}", task_id=task.id,
                 )
+            elif field == "due_at":
+                # Напоминания «за N дней до срока» едут вместе со сроком.
+                await reminders_service.reschedule_for_task(db, task, now=datetime.now(UTC))
 
     await db.flush()
     return await service.get_task_out(db, task)

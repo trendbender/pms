@@ -104,6 +104,32 @@ def _stop_reason(
     return None
 
 
+def plan_initial(reminder: Reminder, task: Task, *, now: datetime) -> bool:
+    """Первый момент при заведении. False — напоминать уже не о чем (момент прошёл)."""
+    return plan_next(reminder, task, after=now)
+
+
+async def reschedule_for_task(db: AsyncSession, task: Task, *, now: datetime) -> int:
+    """Пересчитать напоминания, привязанные к сроку задачи: срок двинули — едут и они.
+
+    Напоминания без якоря (`due_offset_days` пуст) не трогаем: их расписание
+    задано датой начала и к сроку отношения не имеет.
+    """
+    rows = await db.scalars(
+        select(Reminder).where(
+            Reminder.task_id == task.id,
+            Reminder.status == ReminderStatus.ACTIVE,
+            Reminder.due_offset_days.is_not(None),
+        )
+    )
+    moved = 0
+    for reminder in rows.all():
+        if not plan_next(reminder, task, after=now):
+            stop(reminder, "срок задачи ушёл в прошлое")
+        moved += 1
+    return moved
+
+
 async def fire_due(db: AsyncSession, now: datetime, *, limit: int = BATCH) -> int:
     """Отработать все напоминания, которым пора. Возвращает число отправленных."""
     rows = await db.scalars(

@@ -284,3 +284,226 @@ async def test_a_reminder_without_a_channel_stays_inside_pms(client, session):
     await session.commit()
     assert (await session.scalars(select(OutboxMessage))).first() is None
     assert (await session.scalars(select(Notification))).one().kind == "reminder"
+
+
+# --------------------------------------------------------------------------- #
+# API: кто что может и что двигает сроки
+# --------------------------------------------------------------------------- #
+
+
+async def _member(client, session, ws, project_id, tok, email="member@rmd.ex", role="MEMBER"):
+    user = await make_user(session, ws, email, SystemRole.MEMBER)
+    await session.commit()
+    r = await client.post(
+        f"/projects/{project_id}/members",
+        headers=_auth(tok),
+        json={"user_id": str(user.id), "role": role},
+    )
+    assert r.status_code in (200, 201), r.text
+    return user, await _token(client, email)
+
+
+@pytest.mark.asyncio
+async def test_create_reminder_through_the_api(client, session):
+    ws, user_id, tok, project, task = await _setup(client, session, code="AP1", email="a1@rmd.ex")
+    r = await client.post(
+        f"/tasks/{task['id']}/reminders",
+        headers=_auth(tok),
+        json={
+            "schedule": "DAILY",
+            "at_time": "10:00:00",
+            "start_on": "2099-01-04",
+            "stop_on_done": True,
+        },
+    )
+    assert r.status_code == 201, r.text
+    body = r.json()
+    assert body["status"] == "ACTIVE"
+    assert body["next_fire_at"].startswith("2099-01-04T07:00")  # 10:00 МСК
+    assert body["task_key"] == task["key"]
+    assert body["log"] == []
+
+
+@pytest.mark.asyncio
+async def test_a_moment_in_the_past_is_refused(client, session):
+    ws, user_id, tok, project, task = await _setup(client, session, code="AP2", email="a2@rmd.ex")
+    r = await client.post(
+        f"/tasks/{task['id']}/reminders",
+        headers=_auth(tok),
+        json={"schedule": "ONCE", "start_on": "2020-01-01"},
+    )
+    assert r.status_code == 400, r.text
+
+
+@pytest.mark.asyncio
+async def test_member_may_remind_in_pms_but_not_into_the_project_chat(client, session):
+    ws, user_id, tok, project, task = await _setup(client, session, code="AP3", email="a3@rmd.ex")
+    r = await client.post(
+        f"/projects/{project['id']}/channels",
+        headers=_auth(tok),
+        json={"name": "Чат проекта", "address": "-4853904340", "is_default": True},
+    )
+    assert r.status_code == 201, r.text
+    channel = r.json()
+
+    _, member_tok = await _member(client, session, ws, project["id"], tok)
+
+    inside = await client.post(
+        f"/tasks/{task['id']}/reminders",
+        headers=_auth(member_tok),
+        json={"schedule": "ONCE", "start_on": "2099-01-04"},
+    )
+    assert inside.status_code == 201, inside.text
+
+    outside = await client.post(
+        f"/tasks/{task['id']}/reminders",
+        headers=_auth(member_tok),
+        json={"schedule": "ONCE", "start_on": "2099-01-04", "channel_id": channel["id"]},
+    )
+    assert outside.status_code == 403
+    assert "reminder.external" in outside.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_snooze_and_stop(client, session):
+    ws, user_id, tok, project, task = await _setup(client, session, code="AP4", email="a4@rmd.ex")
+    r = await client.post(
+        f"/tasks/{task['id']}/reminders",
+        headers=_auth(tok),
+        json={"schedule": "DAILY", "start_on": "2099-01-04"},
+    )
+    reminder = r.json()
+
+    r = await client.post(
+        f"/reminders/{reminder['id']}/snooze", headers=_auth(tok), json={"days": 3}
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["next_fire_at"].startswith("2099-01-07T07:00")
+
+    r = await client.post(f"/reminders/{reminder['id']}/stop", headers=_auth(tok))
+    assert r.status_code == 200, r.text
+    assert r.json()["status"] == "CANCELLED"
+    assert r.json()["next_fire_at"] is None
+
+
+@pytest.mark.asyncio
+async def test_moving_the_due_date_moves_the_anchored_reminder(client, session):
+    ws, user_id, tok, project, task = await _setup(client, session, code="AP5", email="a5@rmd.ex")
+    r = await client.patch(
+        f"/tasks/{task['id']}", headers=_auth(tok), json={"due_at": "2099-03-10T09:00:00Z"}
+    )
+    assert r.status_code == 200, r.text
+
+    r = await client.post(
+        f"/tasks/{task['id']}/reminders",
+        headers=_auth(tok),
+        json={"schedule": "ONCE", "due_offset_days": -2},
+    )
+    assert r.status_code == 201, r.text
+    assert r.json()["next_fire_at"].startswith("2099-03-08T07:00")
+
+    r = await client.patch(
+        f"/tasks/{task['id']}", headers=_auth(tok), json={"due_at": "2099-03-17T09:00:00Z"}
+    )
+    assert r.status_code == 200, r.text
+
+    moved = (await session.scalars(select(Reminder))).one()
+    await session.refresh(moved)
+    assert moved.next_fire_at == datetime(2099, 3, 15, 7, 0, tzinfo=UTC)
+
+
+@pytest.mark.asyncio
+async def test_the_relay_takes_the_queue_and_marks_it_sent(client, session):
+    ws, user_id, tok, project, task = await _setup(client, session, code="AP6", email="a6@rmd.ex")
+    channel = ProjectChannel(
+        workspace_id=ws.id,
+        project_id=UUID(project["id"]),
+        kind="TELEGRAM",
+        name="Чат",
+        address="-100500",
+    )
+    session.add(channel)
+    await session.flush()
+    session.add(
+        _reminder(
+            ws.id,
+            UUID(project["id"]),
+            UUID(task["id"]),
+            channel_id=channel.id,
+            notify_user_id=user_id,
+        )
+    )
+    await session.commit()
+    await fire_due(session, datetime(2026, 11, 4, 7, 1, tzinfo=UTC))
+    await session.commit()
+
+    r = await client.get("/outbox/pending", headers=_auth(tok))
+    assert r.status_code == 200, r.text
+    queue = r.json()
+    assert len(queue) == 1
+    assert queue[0]["address"] == "-100500"
+
+    r = await client.post(f"/outbox/{queue[0]['id']}/sent", headers=_auth(tok))
+    assert r.status_code == 200, r.text
+    assert r.json()["status"] == "SENT"
+
+    assert (await client.get("/outbox/pending", headers=_auth(tok))).json() == []
+
+
+@pytest.mark.asyncio
+async def test_a_failed_send_stays_in_the_queue_until_attempts_run_out(client, session):
+    ws, user_id, tok, project, task = await _setup(client, session, code="AP7", email="a7@rmd.ex")
+    channel = ProjectChannel(
+        workspace_id=ws.id,
+        project_id=UUID(project["id"]),
+        kind="TELEGRAM",
+        name="Чат",
+        address="-100501",
+    )
+    session.add(channel)
+    await session.flush()
+    session.add(
+        _reminder(
+            ws.id,
+            UUID(project["id"]),
+            UUID(task["id"]),
+            channel_id=channel.id,
+            notify_user_id=user_id,
+        )
+    )
+    await session.commit()
+    await fire_due(session, datetime(2026, 11, 4, 7, 1, tzinfo=UTC))
+    await session.commit()
+
+    message_id = (await client.get("/outbox/pending", headers=_auth(tok))).json()[0]["id"]
+    for attempt in (1, 2):
+        r = await client.post(
+            f"/outbox/{message_id}/failed", headers=_auth(tok), params={"error": "таймаут"}
+        )
+        assert r.json()["status"] == "PENDING", attempt
+    r = await client.post(
+        f"/outbox/{message_id}/failed", headers=_auth(tok), params={"error": "таймаут"}
+    )
+    assert r.json()["status"] == "FAILED"
+    assert r.json()["attempts"] == 3
+
+
+@pytest.mark.asyncio
+async def test_snooze_without_a_timezone_means_the_reminders_timezone(client, session):
+    ws, user_id, tok, project, task = await _setup(client, session, code="AP8", email="a8@rmd.ex")
+    r = await client.post(
+        f"/tasks/{task['id']}/reminders",
+        headers=_auth(tok),
+        json={"schedule": "DAILY", "start_on": "2099-01-04", "timezone": MSK},
+    )
+    reminder = r.json()
+    r = await client.post(
+        f"/reminders/{reminder['id']}/snooze",
+        headers=_auth(tok),
+        json={"until": "2099-01-09T09:00:00"},
+    )
+    assert r.status_code == 200, r.text
+    # 09:00 по Москве, а не по часам сервера (тот же момент, что 06:00 UTC)
+    assert datetime.fromisoformat(r.json()["next_fire_at"]) == datetime(
+        2099, 1, 9, 6, 0, tzinfo=UTC
+    )

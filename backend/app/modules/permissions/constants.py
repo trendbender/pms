@@ -56,6 +56,14 @@ class Perm(StrEnum):
     # Лиды: видят и ведут участники проекта (контакты без маски, решение
     # 18.10.2026); удаляет менеджер; воронку, поля и ключи приёма настраивает
     # владелец проекта или админ workspace.
+    # Напоминания: видит тот, кто видит задачу; ставит участник проекта.
+    # Отправка во ВНЕШНИЙ канал (чат клиента) — только управляющий уровень:
+    # исполнитель не должен уметь слать сообщения клиенту от имени проекта.
+    REMINDER_VIEW = "reminder.view"
+    REMINDER_MANAGE = "reminder.manage"
+    REMINDER_EXTERNAL = "reminder.external"
+    CHANNEL_MANAGE = "channel.manage"
+
     LEAD_VIEW = "lead.view"
     LEAD_MANAGE = "lead.manage"
     LEAD_DELETE = "lead.delete"
@@ -74,6 +82,7 @@ _READ_PERMS: frozenset[Perm] = frozenset(
         Perm.SPRINT_VIEW,
         Perm.ROADMAP_VIEW,
         Perm.BOARD_VIEW,
+        Perm.REMINDER_VIEW,
     }
 )
 
@@ -89,6 +98,7 @@ _MEMBER_PERMS: frozenset[Perm] = _READ_PERMS | frozenset(
         Perm.ATTACHMENT_UPLOAD,
         Perm.LEAD_VIEW,
         Perm.LEAD_MANAGE,
+        Perm.REMINDER_MANAGE,
     }
 )
 
@@ -107,6 +117,8 @@ _MANAGER_PERMS: frozenset[Perm] = _MEMBER_PERMS | frozenset(
         Perm.FINANCE_VIEW,
         Perm.FINANCE_MANAGE,
         Perm.LEAD_DELETE,
+        Perm.REMINDER_EXTERNAL,
+        Perm.CHANNEL_MANAGE,
     }
 )
 

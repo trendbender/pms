@@ -63,6 +63,32 @@ services:
     pids_limit: 512
     restart: unless-stopped
 
+  # Напоминания: тик раз в минуту. Отдельный процесс, потому что веб-запрос
+  # не должен зависеть от фоновой работы, а фоновая — от перезапуска веба.
+  # Миграции накатывает backend, воркер их только ждёт.
+  worker:
+    build: ./backend
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      REDIS_URL: redis://redis:6379/0
+    depends_on:
+      postgres:
+        condition: service_healthy
+      backend:
+        condition: service_started
+    command: sh -c "python -m app.worker"
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    mem_limit: 384m
+    pids_limit: 256
+    restart: unless-stopped
+
   frontend:
     build:
       context: ./frontend

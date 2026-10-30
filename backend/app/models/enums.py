@@ -143,3 +143,36 @@ DEFAULT_TYPES: list[str] = ["TASK", "BUG", "FEATURE", "IMPROVEMENT", "RESEARCH"]
 # user's chosen language; add a code here (and a frontend dictionary) to extend.
 SUPPORTED_LANGUAGES: frozenset[str] = frozenset({"ru", "en"})
 DEFAULT_LANGUAGE: str = "ru"
+
+
+class ReminderSchedule(StrEnum):
+    """Как часто напоминание повторяется."""
+
+    ONCE = "ONCE"          # один раз в назначенный день
+    DAILY = "DAILY"        # каждый день
+    WEEKDAYS = "WEEKDAYS"  # по рабочим дням (сб, вс и праздники пропускаем)
+    WEEKLY = "WEEKLY"      # раз в неделю, в заданный день недели
+
+
+class ReminderStatus(StrEnum):
+    ACTIVE = "ACTIVE"
+    PAUSED = "PAUSED"
+    COMPLETED = "COMPLETED"  # отработало: задача закрыта, срок вышел или лимит исчерпан
+    CANCELLED = "CANCELLED"  # снято человеком
+
+
+class ChannelKind(StrEnum):
+    """Куда проекту разрешено писать наружу."""
+
+    TELEGRAM = "TELEGRAM"
+
+
+class OutboxStatus(StrEnum):
+    PENDING = "PENDING"
+    SENT = "SENT"
+    FAILED = "FAILED"
+    CANCELLED = "CANCELLED"
+
+
+# Часовой пояс напоминаний по умолчанию: владелец и исполнители живут по Москве.
+DEFAULT_REMINDER_TZ: str = "Europe/Moscow"

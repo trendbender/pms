@@ -1652,6 +1652,195 @@ def cmd_decisions_sync(client, args):
     out(r, args.json, show)
 
 
+# --------------------------------------------------------------------------- #
+# Напоминания и каналы проекта (движок PMS, а не cron)
+# --------------------------------------------------------------------------- #
+
+SCHEDULE_WORDS = {"once": "ONCE", "daily": "DAILY", "weekdays": "WEEKDAYS", "weekly": "WEEKLY"}
+WEEKDAY_WORDS = {"пн": 0, "вт": 1, "ср": 2, "чт": 3, "пт": 4, "сб": 5, "вс": 6,
+                 "mon": 0, "tue": 1, "wed": 2, "thu": 3, "fri": 4, "sat": 5, "sun": 6}
+SCHEDULE_RU = {"ONCE": "один раз", "DAILY": "каждый день",
+               "WEEKDAYS": "по рабочим дням", "WEEKLY": "раз в неделю"}
+
+
+def _remind_day(value: str) -> str:
+    """«04.11» | «2026-11-04» | «завтра» | «+3d» → YYYY-MM-DD (время берётся из --at)."""
+    iso = parse_due(value)
+    if iso is None:
+        die("дата напоминания не может быть пустой")
+    return iso[:10]
+
+
+def _remind_time(value: str) -> str:
+    m = re.fullmatch(r"(\d{1,2})[:.](\d{2})", (value or "").strip())
+    if not m:
+        die(f"не понимаю время: {value} (пример: 10:00)")
+    return f"{int(m.group(1)):02d}:{m.group(2)}:00"
+
+
+def resolve_channel(client, project_id: str, ref: str) -> dict:
+    channels = client.call("GET", f"/projects/{project_id}/channels")
+    if not channels:
+        die("у проекта нет каналов: заведи его командой channel add")
+    low = ref.strip().lower()
+    if low in ("project", "проект", "default", "по умолчанию"):
+        for c in channels:
+            if c["is_default"]:
+                return c
+        if len(channels) == 1:
+            return channels[0]
+        die("у проекта нет канала по умолчанию: укажи его по имени или пометь --default")
+    for c in channels:
+        if c["name"].lower() == low or c["address"] == ref.strip():
+            return c
+    for c in channels:
+        if low in c["name"].lower():
+            return c
+    die(f"канал не найден: {ref}")
+
+
+def resolve_reminder(client, key: str, ref: str | None) -> dict:
+    """Напоминание адресуется задачей: обычно оно у неё одно."""
+    task = resolve_task(client, key)
+    items = client.call("GET", f"/tasks/{task['id']}/reminders")
+    if ref:
+        matched = [r for r in items if r["id"].startswith(ref)]
+        if not matched:
+            die(f"напоминание не найдено: {ref}")
+        return matched[0]
+    active = [r for r in items if r["status"] == "ACTIVE"]
+    if not active:
+        die(f"у {task['key']} нет действующих напоминаний")
+    if len(active) > 1:
+        die(f"у {task['key']} их {len(active)}: укажи --id (первые знаки) — "
+            + ", ".join(r["id"][:8] for r in active))
+    return active[0]
+
+
+def _remind_line(r: dict) -> str:
+    when = fmt_due(r.get("next_fire_at"), long=False) or "—"
+    every = SCHEDULE_RU.get(r["schedule"], r["schedule"])
+    at = str(r["at_time"])[:5]
+    bits = [f"{r.get('task_key') or '':8} {r['id'][:8]}  {every} в {at}  → {when}"]
+    if r["fire_count"]:
+        bits.append(f"напомнили {r['fire_count']}")
+    if r["status"] != "ACTIVE":
+        bits.append(f"{r['status'].lower()}: {r.get('stop_reason') or ''}".strip(": "))
+    return "  · ".join(bits)
+
+
+def cmd_remind_add(client, args):
+    task = resolve_task(client, args.key)
+    body = {
+        "schedule": args.schedule,
+        "at_time": _remind_time(args.at),
+        "stop_on_done": not args.ignore_done,
+        "comment_on_task": bool(args.comment),
+    }
+    if args.before_due is not None:
+        body["due_offset_days"] = -args.before_due
+    if getattr(args, "from_day", None):
+        body["start_on"] = _remind_day(args.from_day)
+    elif args.before_due is None:
+        body["start_on"] = _remind_day("сегодня")
+    if args.until:
+        body["until_on"] = _remind_day(args.until)
+    if args.times:
+        body["max_fires"] = args.times
+    if args.weekday:
+        low = args.weekday.strip().lower()
+        if low not in WEEKDAY_WORDS:
+            die(f"не понимаю день недели: {args.weekday} (пн вт ср чт пт сб вс)")
+        body["weekday"] = WEEKDAY_WORDS[low]
+    if args.mention:
+        body["mention"] = args.mention
+    if args.message:
+        body["message"] = args.message
+    if args.to:
+        body["notify_user_id"] = resolve_user(client, args.to)["id"]
+    if args.escalate_after:
+        body["escalate_after_fires"] = args.escalate_after
+        body["escalate_to_id"] = resolve_user(client, args.escalate_to or args.to or "").get("id") \
+            if (args.escalate_to or args.to) else None
+    if args.channel:
+        body["channel_id"] = resolve_channel(client, task["project_id"], args.channel)["id"]
+
+    r = client.call("POST", f"/tasks/{task['id']}/reminders", body)
+    out(r, args.json, lambda r: print(
+        f"напоминание по {task['key']}: {SCHEDULE_RU.get(r['schedule'], r['schedule'])} "
+        f"в {str(r['at_time'])[:5]}, первое — {fmt_due(r['next_fire_at'], long=True)}"
+        + ("\nостановится само, когда задачу закроют" if r["stop_on_done"] else "")
+        + f"\n{client.task_url(task['key'])}"))
+
+
+def cmd_remind_list(client, args):
+    if args.key:
+        task = resolve_task(client, args.key)
+        items = client.call("GET", f"/tasks/{task['id']}/reminders")
+    else:
+        path = "/reminders?active_only=" + ("false" if args.all else "true")
+        if args.project:
+            path += "&project_id=" + resolve_project(client, args.project)["id"]
+        items = client.call("GET", path)
+    out(items, args.json, lambda items: print(
+        "\n".join(_remind_line(r) for r in items) if items else "напоминаний нет"))
+
+
+def cmd_remind_snooze(client, args):
+    r = resolve_reminder(client, args.key, args.id)
+    if args.until:
+        day = _dt.date.fromisoformat(_remind_day(args.until))
+        moment = _dt.time.fromisoformat(_remind_time(args.at or "10:00"))
+        # Время переноса — московское: без явного пояса сервер взял бы своё.
+        body = {"until": _dt.datetime.combine(day, moment, MSK).isoformat()}
+    else:
+        body = {"days": args.days}
+    r = client.call("POST", f"/reminders/{r['id']}/snooze", body)
+    out(r, args.json, lambda r: print(f"перенесено на {fmt_due(r['next_fire_at'], long=True)}"))
+
+
+def cmd_remind_stop(client, args):
+    r = resolve_reminder(client, args.key, args.id)
+    r = client.call("POST", f"/reminders/{r['id']}/stop")
+    out(r, args.json, lambda r: print(f"снято: {r['stop_reason']}"))
+
+
+def cmd_remind_log(client, args):
+    r = resolve_reminder(client, args.key, args.id)
+    r = client.call("GET", f"/reminders/{r['id']}")
+
+    def show(r):
+        print(f"{r.get('task_key')}  {SCHEDULE_RU.get(r['schedule'], r['schedule'])} "
+              f"в {str(r['at_time'])[:5]}  · напомнили {r['fire_count']}")
+        if r["next_fire_at"]:
+            print("следующее:", fmt_due(r["next_fire_at"], long=True))
+        if r["stop_reason"]:
+            print("остановлено:", r["stop_reason"])
+        for m in r["log"]:
+            print(f"  {fmt_due(m['scheduled_for'], long=True):22} {m['status']:8} {m['address']}"
+                  + (f"  ошибка: {m['error']}" if m.get("error") else ""))
+
+    out(r, args.json, show)
+
+
+def cmd_channel_list(client, args):
+    project = resolve_project(client, args.project)
+    items = client.call("GET", f"/projects/{project['id']}/channels")
+    out(items, args.json, lambda items: print("\n".join(
+        f"{'*' if c['is_default'] else ' '} {c['name']:24} {c['kind']:9} {c['address']}"
+        + ("" if c["enabled"] else "  (выключен)") for c in items) or "каналов нет"))
+
+
+def cmd_channel_add(client, args):
+    project = resolve_project(client, args.project)
+    body = {"name": args.name, "address": args.address, "is_default": args.default}
+    if args.thread:
+        body["thread_id"] = args.thread
+    c = client.call("POST", f"/projects/{project['id']}/channels", body)
+    out(c, args.json, lambda c: print(
+        f"канал «{c['name']}» {c['address']}" + (" (по умолчанию)" if c["is_default"] else "")))
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="pms.py", description="PMS task control CLI")
     p.add_argument("--json", action="store_true", help="machine-readable JSON output")
@@ -2004,6 +2193,74 @@ def build_parser() -> argparse.ArgumentParser:
     m.add_argument("--token-file", help="файл с ключом; иначе env PMS_LEAD_TOKEN")
     m.add_argument("--api", help="адрес API, если нет конфига")
     m.set_defaults(fn=cmd_lead_ingest, no_auth=True)
+
+    sp = sub.add_parser("remind", help="напоминания по задаче (движок PMS, не cron)")
+    rsub = sp.add_subparsers(dest="sub", required=True)
+
+    m = rsub.add_parser("add", help="завести напоминание")
+    m.add_argument("key", help="задача, например SSK-415")
+    m.add_argument("--from", dest="from_day", help="с какого дня: 04.11, 2026-11-04, завтра, +3d")
+    m.add_argument("--at", default="10:00", help="во сколько (по Москве), по умолчанию 10:00")
+    m.add_argument("--once", dest="schedule", action="store_const", const="ONCE", default="ONCE")
+    m.add_argument("--daily", dest="schedule", action="store_const", const="DAILY")
+    m.add_argument("--weekdays", dest="schedule", action="store_const", const="WEEKDAYS",
+                   help="по рабочим дням")
+    m.add_argument("--weekly", dest="schedule", action="store_const", const="WEEKLY")
+    m.add_argument("--weekday", help="для --weekly: пн вт ср чт пт сб вс")
+    m.add_argument("--before-due", type=int, metavar="N",
+                   help="за N дней до срока задачи; перенос срока двигает напоминание")
+    m.add_argument("--until", help="до какой даты напоминать")
+    m.add_argument("--times", type=int, help="сколько раз максимум")
+    m.add_argument("--ignore-done", action="store_true",
+                   help="не останавливаться, когда задачу закроют (по умолчанию останавливается)")
+    m.add_argument("--channel", help="канал проекта: project (по умолчанию) или имя канала")
+    m.add_argument("--mention", help="кого упомянуть в чате, например @vanstallin")
+    m.add_argument("--message", help="свой текст вместо собранного из задачи")
+    m.add_argument("--to", help="кого уведомлять в PMS (email или имя); по умолчанию исполнителя")
+    m.add_argument("--escalate-after", type=int, metavar="N",
+                   help="после N безответных напоминаний сообщить владельцу")
+    m.add_argument("--escalate-to", help="кому эскалировать (email или имя)")
+    m.add_argument("--comment", action="store_true", help="писать каждое напоминание комментарием")
+    m.set_defaults(fn=cmd_remind_add)
+
+    m = rsub.add_parser("list", help="напоминания задачи, проекта или все")
+    m.add_argument("key", nargs="?", help="задача; без неё — по проекту или все")
+    m.add_argument("--project")
+    m.add_argument("--all", action="store_true", help="включая снятые и отработавшие")
+    m.set_defaults(fn=cmd_remind_list)
+
+    m = rsub.add_parser("snooze", help="перенести ближайшее напоминание")
+    m.add_argument("key")
+    m.add_argument("--id", help="первые знаки, если напоминаний несколько")
+    m.add_argument("--days", type=int, default=1)
+    m.add_argument("--until", help="на конкретную дату")
+    m.add_argument("--at", help="во сколько при --until")
+    m.set_defaults(fn=cmd_remind_snooze)
+
+    m = rsub.add_parser("stop", help="снять напоминание")
+    m.add_argument("key")
+    m.add_argument("--id")
+    m.set_defaults(fn=cmd_remind_stop)
+
+    m = rsub.add_parser("log", help="когда и куда напоминали")
+    m.add_argument("key")
+    m.add_argument("--id")
+    m.set_defaults(fn=cmd_remind_log)
+
+    sp = sub.add_parser("channel", help="каналы проекта: куда ему разрешено писать")
+    csub = sp.add_subparsers(dest="sub", required=True)
+
+    m = csub.add_parser("list", help="каналы проекта")
+    m.add_argument("--project", required=True)
+    m.set_defaults(fn=cmd_channel_list)
+
+    m = csub.add_parser("add", help="завести канал (чат проекта)")
+    m.add_argument("--project", required=True)
+    m.add_argument("--name", required=True)
+    m.add_argument("--address", required=True, help="для Telegram — chat_id")
+    m.add_argument("--thread", help="топик внутри чата")
+    m.add_argument("--default", action="store_true", help="канал проекта по умолчанию")
+    m.set_defaults(fn=cmd_channel_add)
 
     return p
 

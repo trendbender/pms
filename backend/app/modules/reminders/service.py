@@ -26,7 +26,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.models.comment import Comment
 from app.models.delivery import OutboxMessage, ProjectChannel
-from app.models.enums import ReminderStatus, StatusCategory
+from app.models.enums import ReminderSchedule, ReminderStatus, StatusCategory
 from app.models.reminder import Reminder
 from app.models.task import Task, TaskStatus
 from app.modules.audit.service import record_activity
@@ -47,6 +47,14 @@ def anchor_date_for(reminder: Reminder, task: Task) -> date | None:
 
 def plan_next(reminder: Reminder, task: Task, *, after: datetime | None) -> bool:
     """Поставить следующий момент. False — расписание исчерпано."""
+    # «Один раз» значит один раз, даже если сработало не в свой момент. Перенос
+    # напоминания в прошлое заставляет его сработать раньше назначенного дня, и
+    # без этой проверки исходный момент остаётся впереди — разовое напоминание
+    # приходит дважды. Нашлось на первом же живом прогоне 30.10.2026.
+    # fire_count пуст, пока строка не долетела до базы: значение ставит default.
+    if reminder.schedule == ReminderSchedule.ONCE and (reminder.fire_count or 0) > 0:
+        reminder.next_fire_at = None
+        return False
     moment = next_fire_at(
         schedule=reminder.schedule,
         at_time=reminder.at_time,

@@ -507,3 +507,30 @@ async def test_snooze_without_a_timezone_means_the_reminders_timezone(client, se
     assert datetime.fromisoformat(r.json()["next_fire_at"]) == datetime(
         2099, 1, 9, 6, 0, tzinfo=UTC
     )
+
+
+@pytest.mark.asyncio
+async def test_once_fires_once_even_after_a_snooze_into_the_past(client, session):
+    """Перенос «на сейчас» не должен оставлять исходный момент впереди."""
+    ws, user_id, tok, project, task = await _setup(client, session, code="AP9", email="a9@rmd.ex")
+    session.add(
+        _reminder(
+            ws.id,
+            UUID(project["id"]),
+            UUID(task["id"]),
+            notify_user_id=user_id,
+            schedule=ReminderSchedule.ONCE,
+            start_on=date(2026, 11, 30),
+            # сработает раньше своего дня — как после snooze в прошлое
+            next_fire_at=datetime(2026, 11, 4, 7, 0, tzinfo=UTC),
+        )
+    )
+    await session.commit()
+
+    assert await fire_due(session, datetime(2026, 11, 4, 7, 1, tzinfo=UTC)) == 1
+    await session.commit()
+
+    reminder = (await session.scalars(select(Reminder))).one()
+    assert reminder.fire_count == 1
+    assert reminder.next_fire_at is None
+    assert reminder.status == ReminderStatus.COMPLETED

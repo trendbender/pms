@@ -38,7 +38,7 @@ GLOBAL_PREFIX = "G"
 _GLOBAL_ALIASES = {"g", "_global", "global"}
 
 _REF_RE = re.compile(r"^(?P<prefix>.+?)-(?P<letter>[A-Za-z])-(?P<num>\d{1,4})$")
-# ключи задач в тексте `source`: «https://pms.klientlab.ru/t/kl-226», «SSK-203»
+# ключи задач в тексте `source`: «https://pms.4queries.com/t/kl-226», «SSK-203»
 _TASK_KEY_RE = re.compile(r"(?<![\w-])([A-Za-z]{2,10}-\d{1,6})(?![\w-])")
 
 _ITEM_FIELDS = (

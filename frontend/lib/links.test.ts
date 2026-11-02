@@ -29,8 +29,8 @@ test("путь сайта из SSK-262: «&», скобка и точка пос
 });
 
 test("голые адреса: хвостовая пунктуация и скобки не входят", () => {
-  assert.deepEqual(links("см. https://pms.klientlab.ru/t/ssk-262."), [
-    ["https://pms.klientlab.ru/t/ssk-262", "https://pms.klientlab.ru/t/ssk-262"],
+  assert.deepEqual(links("см. https://pms.4queries.com/t/ssk-262."), [
+    ["https://pms.4queries.com/t/ssk-262", "https://pms.4queries.com/t/ssk-262"],
   ]);
   assert.deepEqual(links("(отчёт http://46.224.149.23:8444/r/x.html?a=1&b=2)"), [
     ["http://46.224.149.23:8444/r/x.html?a=1&b=2", "http://46.224.149.23:8444/r/x.html?a=1&b=2"],
@@ -49,8 +49,8 @@ test("ключи задач и номера решений", () => {
   ]);
   // не проекты и части адресов — не ссылки
   assert.deepEqual(links("UC-001, ISO-9001, UTF-8, ops/ssk261-pkg"), []);
-  assert.deepEqual(links("https://pms.klientlab.ru/t/SSK-262"), [
-    ["https://pms.klientlab.ru/t/SSK-262", "https://pms.klientlab.ru/t/SSK-262"],
+  assert.deepEqual(links("https://pms.4queries.com/t/SSK-262"), [
+    ["https://pms.4queries.com/t/SSK-262", "https://pms.4queries.com/t/SSK-262"],
   ]);
 });
 
@@ -79,7 +79,7 @@ test("Markdown: путь и ключ оборачиваются, готовое 
   );
   assert.equal(linkifyMarkdown("см. SSK-262", ctx), "см. [SSK-262](</t/ssk-262>)");
   for (const text of [
-    "[кабинет](/lk/claim/) и [SSK-1](https://pms.klientlab.ru/t/ssk-1)",
+    "[кабинет](/lk/claim/) и [SSK-1](https://pms.4queries.com/t/ssk-1)",
     "<https://skolkoskolko.ru/lk/>",
     "https://skolkoskolko.ru/lk/turnkey/?a=1",
     "в коде `/lk/turnkey/ SSK-262` не трогаем",

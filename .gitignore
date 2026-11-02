@@ -52,3 +52,5 @@ deploy/nginx-pms.conf
 
 # frontend unit tests (npm test)
 .test-build/
+# Real legacy vhost (301 from the previous hostname) — same policy as nginx-pms.conf.
+deploy/nginx-pms-legacy.conf

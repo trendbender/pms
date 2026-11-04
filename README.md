@@ -256,4 +256,4 @@ all schema changes go through Alembic migrations.
 
 ## License
 
-[MIT](LICENSE) © 2026 KlientLab
+[MIT](LICENSE) © 2026 4Queries
